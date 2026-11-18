@@ -1,0 +1,16 @@
+# Optional Render Blueprint — set secrets in the dashboard, never commit values.
+services:
+  - type: web
+    name: sector-sentinel-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: API_SECRET_KEY
+        sync: false
+      - key: REVENUECAT_WEBHOOK_SECRET
+        sync: false
+      - key: SYNC_HMAC_SECRET
+        sync: false

@@ -4,6 +4,22 @@
     "slug": "sector-sentinel",
     "version": "0.1.0",
     "sdkVersion": "52.0.0",
-    "platforms": ["ios", "android"]
+    "platforms": ["ios", "android"],
+    "ios": {
+      "bundleIdentifier": "com.sectorsentinel.app"
+    },
+    "android": {
+      "package": "com.sectorsentinel.app"
+    },
+    "plugins": [
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY",
+          "iosAppId": "ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY"
+        }
+      ],
+      "react-native-purchases"
+    ]
   }
 }

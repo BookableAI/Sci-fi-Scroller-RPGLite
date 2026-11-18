@@ -11,6 +11,10 @@ import {
   getUpgradeRequirements,
   decryptionTimeForTier,
 } from '../engine/ProbabilityMatrix';
+import { AdMobManager } from '../services/AdMobManager';
+import {
+  OVERCLOCK_SPEED_MULTIPLIER,
+} from '../types/monetization';
 import {
   CACHE_BUFFER_CAPACITY,
   RARITY_RANK,
@@ -24,6 +28,12 @@ import {
   type SupplyCache,
   type TelemetryStats,
 } from '../types/game';
+
+export interface NanitePackGrant {
+  cores: number;
+  bonusCaches: number;
+  fillEmptyCacheSlots: boolean;
+}
 
 const mmkv = new MMKV({ id: 'sector-sentinel-game' });
 
@@ -159,6 +169,13 @@ export interface GameStoreState extends PersistedGameSnapshot {
   resolveComparisonSalvage: () => void;
   /** Skip remaining fabrication timer (e.g. rewarded Instant Fabrication) */
   completeFabricationNow: () => void;
+  /** Activate System Overclock (2x combat speed) for durationMs */
+  activateOverclock: (durationMs: number) => void;
+  isOverclockActive: () => boolean;
+  /** 2 while overclock active, else 1 — consumed by BattlerEngine */
+  getCombatSpeedMultiplier: () => number;
+  /** Apply RevenueCat Nanite Cache pack contents */
+  grantNanitePack: (grant: NanitePackGrant) => void;
 }
 
 const initialEquipped: EquippedGear = {};
@@ -179,6 +196,7 @@ export const useGameStore = create<GameStoreState>()(
       cacheFabrication: null as CacheFabricationJob | null,
       pendingComparisonGear: null as GearItem | null,
       comparisonQueue: [] as GearItem[],
+      overclockExpiresAtMs: null as number | null,
 
       getBatchCapacity: (): number => getBatchCapacity(get().currentSectorWorld),
 
@@ -187,8 +205,55 @@ export const useGameStore = create<GameStoreState>()(
       getTelemetryStats: (): TelemetryStats =>
         computeTelemetryStats(get().equippedGear),
 
+      activateOverclock: (durationMs: number): void => {
+        const ms = Math.max(0, Math.floor(durationMs));
+        if (ms <= 0) {
+          return;
+        }
+        const now = Date.now();
+        const current = get().overclockExpiresAtMs;
+        const base = current !== null && current > now ? current : now;
+        set({ overclockExpiresAtMs: base + ms });
+      },
+
+      isOverclockActive: (): boolean => {
+        const expires = get().overclockExpiresAtMs;
+        return expires !== null && expires > Date.now();
+      },
+
+      getCombatSpeedMultiplier: (): number => {
+        const expires = get().overclockExpiresAtMs;
+        if (expires !== null && expires > Date.now()) {
+          return OVERCLOCK_SPEED_MULTIPLIER;
+        }
+        return 1;
+      },
+
+      grantNanitePack: (grant: NanitePackGrant): void => {
+        const state = get();
+        let cacheBuffer = [...state.cacheBuffer];
+        const cores = state.cores + Math.max(0, Math.floor(grant.cores));
+
+        const pushCaches = (count: number): void => {
+          for (let i = 0; i < count; i += 1) {
+            if (cacheBuffer.length >= state.cacheSlots) {
+              break;
+            }
+            cacheBuffer = [...cacheBuffer, createSupplyCache(state.cacheLevel)];
+          }
+        };
+
+        pushCaches(Math.max(0, Math.floor(grant.bonusCaches)));
+        if (grant.fillEmptyCacheSlots) {
+          pushCaches(state.cacheSlots - cacheBuffer.length);
+        }
+
+        set({ cores, cacheBuffer });
+      },
+
       applyCombatVictory: (salvageCredits: number, dropSupplyCache: boolean): void => {
         const state = get();
+        const completedLevel = state.currentSectorLevel;
         const creditGain = Math.max(0, Math.floor(salvageCredits));
         let credits = state.credits + creditGain;
 
@@ -210,6 +275,9 @@ export const useGameStore = create<GameStoreState>()(
           currentSectorLevel,
           currentSectorWorld,
         });
+
+        // Interstitial on level % 5 === 0; preload when landing on X-4 / X-9
+        void AdMobManager.handleSectorProgress(completedLevel, currentSectorLevel);
       },
 
       addCache: (tier?: number): boolean => {
@@ -593,6 +661,7 @@ export const useGameStore = create<GameStoreState>()(
         cacheFabrication: state.cacheFabrication,
         pendingComparisonGear: state.pendingComparisonGear,
         comparisonQueue: state.comparisonQueue,
+        overclockExpiresAtMs: state.overclockExpiresAtMs,
       }),
       merge: (persistedState, currentState): GameStoreState => {
         const persisted = (persistedState ?? {}) as Partial<PersistedGameSnapshot>;
@@ -602,6 +671,7 @@ export const useGameStore = create<GameStoreState>()(
           cacheFabrication: persisted.cacheFabrication ?? null,
           pendingComparisonGear: persisted.pendingComparisonGear ?? null,
           comparisonQueue: persisted.comparisonQueue ?? [],
+          overclockExpiresAtMs: persisted.overclockExpiresAtMs ?? null,
         };
       },
     },

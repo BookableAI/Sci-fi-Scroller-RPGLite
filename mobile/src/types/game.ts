@@ -109,6 +109,8 @@ export type PersistedGameSnapshot = {
   pendingComparisonGear: GearItem | null;
   /** Additional decrypted gear queued behind the active comparison modal */
   comparisonQueue: GearItem[];
+  /** Epoch ms when System Overclock (2x) expires; null when inactive */
+  overclockExpiresAtMs: number | null;
 };
 
 /** Derived loadout telemetry shown in TelemetryPanel */
