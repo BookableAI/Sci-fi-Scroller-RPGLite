@@ -3,6 +3,8 @@
  * Interstitials: every 5th sector clear; preload at X-4 / X-9; skip if no_ads.
  *
  * Soft-fails in Expo Go / when the native module is unavailable (dev client required).
+ * Never statically imports react-native-google-mobile-ads — require only after a
+ * TurboModule probe so Expo Go never touches RNGoogleMobileAdsModule.
  */
 
 import {
@@ -11,12 +13,45 @@ import {
 } from '../types/monetization';
 import { useGameStore } from '../store/useGameStore';
 import { AdUnitIds } from './monetizationConfig';
-import { hasCustomNativeModules } from './nativeAvailability';
-import { PurchaseManager } from './PurchaseManager';
+import {
+  NATIVE_MODULE_NAMES,
+  canRequireNativeModule,
+} from './nativeAvailability';
 
-type AdsModule = typeof import('react-native-google-mobile-ads');
-type InterstitialHandle = ReturnType<AdsModule['InterstitialAd']['createForAdRequest']>;
-type RewardedHandle = ReturnType<AdsModule['RewardedAd']['createForAdRequest']>;
+type AdsModule = {
+  InterstitialAd: {
+    createForAdRequest: (
+      unitId: string,
+      opts?: { requestNonPersonalizedAdsOnly?: boolean },
+    ) => InterstitialHandle;
+  };
+  RewardedAd: {
+    createForAdRequest: (
+      unitId: string,
+      opts?: { requestNonPersonalizedAdsOnly?: boolean },
+    ) => RewardedHandle;
+  };
+  AdEventType: {
+    LOADED: string;
+    ERROR: string;
+    CLOSED: string;
+  };
+  RewardedAdEventType: {
+    EARNED_REWARD: string;
+  };
+};
+
+type InterstitialHandle = {
+  addAdEventListener: (event: string, cb: () => void) => void;
+  load: () => void;
+  show: () => Promise<void>;
+};
+
+type RewardedHandle = {
+  addAdEventListener: (event: string, cb: () => void) => void;
+  load: () => void;
+  show: () => Promise<void>;
+};
 
 let adsModule: AdsModule | null | undefined;
 let unavailableLogged = false;
@@ -25,7 +60,8 @@ function loadAdsModule(): AdsModule | null {
   if (adsModule !== undefined) {
     return adsModule;
   }
-  if (!hasCustomNativeModules()) {
+  // Probe first — never evaluate the package (getEnforcing) in Expo Go.
+  if (!canRequireNativeModule(NATIVE_MODULE_NAMES.admob)) {
     adsModule = null;
     return adsModule;
   }
@@ -139,6 +175,18 @@ function shouldShowInterstitialForCompletedLevel(completedLevel: number): boolea
   return completedLevel > 0 && completedLevel % 5 === 0;
 }
 
+function getPurchaseManager(): typeof import('./PurchaseManager').PurchaseManager | null {
+  try {
+    // Lazy to keep PurchaseManager off the critical AdMob type graph at parse time.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return (
+      require('./PurchaseManager') as typeof import('./PurchaseManager')
+    ).PurchaseManager;
+  } catch {
+    return null;
+  }
+}
+
 export const AdMobManager = {
   /** Warm interstitial + rewarded once at app start. Soft-fails without native ads. */
   initialize(): void {
@@ -171,7 +219,10 @@ export const AdMobManager = {
       return;
     }
 
-    const noAds = await PurchaseManager.hasNoAdsEntitlement();
+    const PurchaseManager = getPurchaseManager();
+    const noAds = PurchaseManager
+      ? await PurchaseManager.hasNoAdsEntitlement()
+      : false;
     if (noAds) {
       return;
     }
@@ -187,7 +238,10 @@ export const AdMobManager = {
     if (interstitialShowing) {
       return false;
     }
-    const noAds = await PurchaseManager.hasNoAdsEntitlement();
+    const PurchaseManager = getPurchaseManager();
+    const noAds = PurchaseManager
+      ? await PurchaseManager.hasNoAdsEntitlement()
+      : false;
     if (noAds) {
       return false;
     }

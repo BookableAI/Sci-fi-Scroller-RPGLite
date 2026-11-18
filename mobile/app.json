@@ -15,13 +15,6 @@
       "package": "com.sectorsentinel.app"
     },
     "plugins": [
-      [
-        "react-native-google-mobile-ads",
-        {
-          "androidAppId": "ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY",
-          "iosAppId": "ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY"
-        }
-      ],
       "expo-asset"
     ]
   }

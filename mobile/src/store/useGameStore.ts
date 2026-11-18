@@ -10,8 +10,10 @@ import {
   getUpgradeRequirements,
   decryptionTimeForTier,
 } from '../engine/ProbabilityMatrix';
-import { AdMobManager } from '../services/AdMobManager';
-import { hasCustomNativeModules } from '../services/nativeAvailability';
+import {
+  NATIVE_MODULE_NAMES,
+  canRequireNativeModule,
+} from '../services/nativeAvailability';
 import {
   OVERCLOCK_SPEED_MULTIPLIER,
 } from '../types/monetization';
@@ -53,13 +55,20 @@ function createPersistedStorage(): StateStorage {
     };
   };
 
-  if (!hasCustomNativeModules()) {
+  // Probe MmkvCxx before require — package entry calls getEnforcing.
+  if (!canRequireNativeModule(NATIVE_MODULE_NAMES.mmkv)) {
     return memoryFallback();
   }
   try {
     // Native-only; require so Expo Go never evaluates the MMKV binding.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { MMKV } = require('react-native-mmkv') as typeof import('react-native-mmkv');
+    const { MMKV } = require('react-native-mmkv') as {
+      MMKV: new (opts: { id: string }) => {
+        getString: (key: string) => string | undefined;
+        set: (key: string, value: string) => void;
+        delete: (key: string) => void;
+      };
+    };
     const mmkv = new MMKV({ id: 'sector-sentinel-game' });
     return {
       getItem: (name: string): string | null => {
@@ -75,6 +84,23 @@ function createPersistedStorage(): StateStorage {
     };
   } catch {
     return memoryFallback();
+  }
+}
+
+/** Lazy AdMob access — keeps react-native-google-mobile-ads off the store module graph. */
+function getAdMobManager(): {
+  handleSectorProgress: (
+    completedLevel: number,
+    nextLevel: number,
+  ) => Promise<void>;
+} | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return (
+      require('../services/AdMobManager') as typeof import('../services/AdMobManager')
+    ).AdMobManager;
+  } catch {
+    return null;
   }
 }
 
@@ -307,7 +333,10 @@ export const useGameStore = create<GameStoreState>()(
         });
 
         // Interstitial on level % 5 === 0; preload when landing on X-4 / X-9
-        void AdMobManager.handleSectorProgress(completedLevel, currentSectorLevel);
+        const ads = getAdMobManager();
+        if (ads) {
+          void ads.handleSectorProgress(completedLevel, currentSectorLevel);
+        }
       },
 
       addCache: (tier?: number): boolean => {
