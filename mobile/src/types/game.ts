@@ -80,6 +80,14 @@ export const RARITY_RANK: Readonly<Record<Rarity, number>> = {
   CELESTIAL: 6,
 };
 
+/** Active Cache Upgrade fabrication job (Salvage Credits already spent). */
+export interface CacheFabricationJob {
+  targetLevel: number;
+  durationSeconds: number;
+  /** 0–1 fabrication progress */
+  progress: number;
+}
+
 export type PersistedGameSnapshot = {
   inventory: Inventory;
   equippedGear: EquippedGear;
@@ -92,4 +100,21 @@ export type PersistedGameSnapshot = {
   cacheSlots: number;
   /** Rarity below which auto-salvage applies; null disables filter */
   autoSalvageThreshold: Rarity | null;
+  /** In-progress Cache Upgrade fabrication; null when idle */
+  cacheFabrication: CacheFabricationJob | null;
+  /**
+   * Newly decrypted gear awaiting comparison modal resolution.
+   * Held here (and in inventory) until EQUIP & SALVAGE OLD / SALVAGE IMMEDIATELY.
+   */
+  pendingComparisonGear: GearItem | null;
+  /** Additional decrypted gear queued behind the active comparison modal */
+  comparisonQueue: GearItem[];
+};
+
+/** Derived loadout telemetry shown in TelemetryPanel */
+export interface TelemetryStats {
+  totalPowerRating: number;
+  kineticOutput: number;
+  deflectionIndex: number;
+  coreProcessingSpeed: number;
 };

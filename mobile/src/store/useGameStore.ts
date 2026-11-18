@@ -15,12 +15,14 @@ import {
   CACHE_BUFFER_CAPACITY,
   RARITY_RANK,
   type CacheBuffer,
+  type CacheFabricationJob,
   type EquippedGear,
   type GearItem,
   type Inventory,
   type PersistedGameSnapshot,
   type Rarity,
   type SupplyCache,
+  type TelemetryStats,
 } from '../types/game';
 
 const mmkv = new MMKV({ id: 'sector-sentinel-game' });
@@ -70,6 +72,68 @@ export function computeTotalPowerRating(equipped: EquippedGear): number {
   return Math.max(40, total);
 }
 
+/** Kinetic / deflection / core metrics derived from equipped loadout. */
+export function computeTelemetryStats(equipped: EquippedGear): TelemetryStats {
+  const weapon = equipped.WEAPON;
+  const shield = equipped.SHIELD;
+  const core = equipped.CORE_AI;
+  const chassis = equipped.CHASSIS;
+  const propulsion = equipped.PROPULSION;
+
+  const kineticOutput =
+    (weapon?.primaryStat ?? 0) +
+    Math.round((weapon?.secondaryStat ?? 0) * 0.35) +
+    Math.round((propulsion?.secondaryStat ?? 0) * 0.15);
+
+  const deflectionIndex =
+    (shield?.primaryStat ?? 0) +
+    Math.round((chassis?.primaryStat ?? 0) * 0.4) +
+    Math.round((shield?.secondaryStat ?? 0) * 0.5);
+
+  const coreProcessingSpeed =
+    (core?.primaryStat ?? 0) +
+    Math.round((core?.secondaryStat ?? 0) * 0.6) +
+    Math.round((equipped.UTILITY?.secondaryStat ?? 0) * 0.25);
+
+  return {
+    totalPowerRating: computeTotalPowerRating(equipped),
+    kineticOutput,
+    deflectionIndex,
+    coreProcessingSpeed,
+  };
+}
+
+function enqueueComparison(
+  pending: GearItem | null,
+  queue: GearItem[],
+  items: GearItem[],
+): { pendingComparisonGear: GearItem | null; comparisonQueue: GearItem[] } {
+  if (items.length === 0) {
+    return { pendingComparisonGear: pending, comparisonQueue: queue };
+  }
+  if (pending === null) {
+    const [first, ...rest] = items;
+    return {
+      pendingComparisonGear: first,
+      comparisonQueue: [...queue, ...rest],
+    };
+  }
+  return {
+    pendingComparisonGear: pending,
+    comparisonQueue: [...queue, ...items],
+  };
+}
+
+function advanceComparisonQueue(
+  queue: GearItem[],
+): { pendingComparisonGear: GearItem | null; comparisonQueue: GearItem[] } {
+  if (queue.length === 0) {
+    return { pendingComparisonGear: null, comparisonQueue: [] };
+  }
+  const [next, ...rest] = queue;
+  return { pendingComparisonGear: next, comparisonQueue: rest };
+}
+
 export interface GameStoreState extends PersistedGameSnapshot {
   addCache: (tier?: number) => boolean;
   decryptCache: (id: string) => GearItem | null;
@@ -79,15 +143,22 @@ export interface GameStoreState extends PersistedGameSnapshot {
   autoSalvageBelowThreshold: (rarity: Rarity) => number;
   /** Active parallel decryption slots for World 2+ auto-open protocol */
   getBatchCapacity: () => number;
-  /** Tick decrypting caches; completes when progress reaches 1 */
+  /** Tick decrypting caches + fabrication; completes when progress reaches 1 */
   tickDecryption: (deltaSeconds: number) => GearItem[];
   /** Sum of equipped Power Ratings (minimum baseline applied) */
   getTotalPowerRating: () => number;
+  getTelemetryStats: () => TelemetryStats;
   /**
    * Combat kill payout: Salvage Credits, optional Supply Cache drop,
    * then sector level++ (level past 10 advances World and resets to 1).
    */
   applyCombatVictory: (salvageCredits: number, dropSupplyCache: boolean) => void;
+  /** EQUIP & SALVAGE OLD — equip pending gear, salvage displaced item for credits */
+  resolveComparisonEquip: () => void;
+  /** SALVAGE IMMEDIATELY — salvage pending gear for Salvage Credits */
+  resolveComparisonSalvage: () => void;
+  /** Skip remaining fabrication timer (e.g. rewarded Instant Fabrication) */
+  completeFabricationNow: () => void;
 }
 
 const initialEquipped: EquippedGear = {};
@@ -105,10 +176,16 @@ export const useGameStore = create<GameStoreState>()(
       cacheLevel: 1,
       cacheSlots: CACHE_BUFFER_CAPACITY,
       autoSalvageThreshold: null,
+      cacheFabrication: null as CacheFabricationJob | null,
+      pendingComparisonGear: null as GearItem | null,
+      comparisonQueue: [] as GearItem[],
 
       getBatchCapacity: (): number => getBatchCapacity(get().currentSectorWorld),
 
       getTotalPowerRating: (): number => computeTotalPowerRating(get().equippedGear),
+
+      getTelemetryStats: (): TelemetryStats =>
+        computeTelemetryStats(get().equippedGear),
 
       applyCombatVictory: (salvageCredits: number, dropSupplyCache: boolean): void => {
         const state = get();
@@ -173,7 +250,7 @@ export const useGameStore = create<GameStoreState>()(
           return null;
         }
 
-        // Already decrypting and finished → open into inventory
+        // Already decrypting and finished → open into inventory + comparison modal
         if (target.progress < 1) {
           return null;
         }
@@ -182,6 +259,8 @@ export const useGameStore = create<GameStoreState>()(
         const remaining = state.cacheBuffer.filter((c) => c.id !== id);
         let inventory = [...state.inventory, item];
         let credits = state.credits;
+        let pendingComparisonGear = state.pendingComparisonGear;
+        let comparisonQueue = state.comparisonQueue;
 
         const threshold = state.autoSalvageThreshold;
         if (threshold !== null && RARITY_RANK[item.rarity] < RARITY_RANK[threshold]) {
@@ -191,7 +270,18 @@ export const useGameStore = create<GameStoreState>()(
           return item;
         }
 
-        set({ cacheBuffer: remaining, inventory });
+        const enqueued = enqueueComparison(pendingComparisonGear, comparisonQueue, [
+          item,
+        ]);
+        pendingComparisonGear = enqueued.pendingComparisonGear;
+        comparisonQueue = enqueued.comparisonQueue;
+
+        set({
+          cacheBuffer: remaining,
+          inventory,
+          pendingComparisonGear,
+          comparisonQueue,
+        });
         return item;
       },
 
@@ -243,18 +333,50 @@ export const useGameStore = create<GameStoreState>()(
 
       upgradeCacheLevel: (): boolean => {
         const state = get();
-        const { costCredits, nextLevel } = getUpgradeRequirements(state.cacheLevel);
         if (state.cacheLevel >= 15) {
           return false;
         }
+        if (state.cacheFabrication !== null) {
+          return false;
+        }
+        const { costCredits, timerSeconds, nextLevel } = getUpgradeRequirements(
+          state.cacheLevel,
+        );
         if (state.credits < costCredits) {
           return false;
         }
+
+        // Instant fabrication (Level 1→2 timer can still be >0; timer 0 completes immediately)
+        if (timerSeconds <= 0) {
+          set({
+            credits: state.credits - costCredits,
+            cacheLevel: nextLevel,
+            cacheFabrication: null,
+          });
+          return true;
+        }
+
         set({
           credits: state.credits - costCredits,
-          cacheLevel: nextLevel,
+          cacheFabrication: {
+            targetLevel: nextLevel,
+            durationSeconds: timerSeconds,
+            progress: 0,
+          },
         });
         return true;
+      },
+
+      completeFabricationNow: (): void => {
+        const state = get();
+        const job = state.cacheFabrication;
+        if (!job) {
+          return;
+        }
+        set({
+          cacheLevel: job.targetLevel,
+          cacheFabrication: null,
+        });
       },
 
       autoSalvageBelowThreshold: (rarity: Rarity): number => {
@@ -278,9 +400,97 @@ export const useGameStore = create<GameStoreState>()(
         return gained;
       },
 
+      resolveComparisonEquip: (): void => {
+        const state = get();
+        const pending = state.pendingComparisonGear;
+        if (!pending) {
+          return;
+        }
+
+        const inInventory = state.inventory.some((g) => g.id === pending.id);
+        if (!inInventory) {
+          const advanced = advanceComparisonQueue(state.comparisonQueue);
+          set({
+            pendingComparisonGear: advanced.pendingComparisonGear,
+            comparisonQueue: advanced.comparisonQueue,
+          });
+          return;
+        }
+
+        const previous = state.equippedGear[pending.slot];
+        const inventoryWithout = state.inventory.filter((g) => g.id !== pending.id);
+        let credits = state.credits;
+        // Salvage displaced gear for Salvage Credits (do not return to inventory)
+        if (previous) {
+          credits += previous.salvageValue;
+        }
+
+        const advanced = advanceComparisonQueue(state.comparisonQueue);
+        set({
+          inventory: inventoryWithout,
+          credits,
+          equippedGear: {
+            ...state.equippedGear,
+            [pending.slot]: pending,
+          },
+          pendingComparisonGear: advanced.pendingComparisonGear,
+          comparisonQueue: advanced.comparisonQueue,
+        });
+      },
+
+      resolveComparisonSalvage: (): void => {
+        const state = get();
+        const pending = state.pendingComparisonGear;
+        if (!pending) {
+          return;
+        }
+
+        const value = state.inventory.some((g) => g.id === pending.id)
+          ? pending.salvageValue
+          : 0;
+
+        const advanced = advanceComparisonQueue(state.comparisonQueue);
+        set({
+          credits: state.credits + value,
+          inventory: state.inventory.filter((g) => g.id !== pending.id),
+          pendingComparisonGear: advanced.pendingComparisonGear,
+          comparisonQueue: advanced.comparisonQueue,
+        });
+      },
+
       tickDecryption: (deltaSeconds: number): GearItem[] => {
         const state = get();
-        if (deltaSeconds <= 0 || state.cacheBuffer.length === 0) {
+        if (deltaSeconds <= 0) {
+          return [];
+        }
+
+        let cacheLevel = state.cacheLevel;
+        let cacheFabrication = state.cacheFabrication
+          ? { ...state.cacheFabrication }
+          : null;
+
+        // Advance Cache Upgrade fabrication
+        if (cacheFabrication) {
+          const rate =
+            cacheFabrication.durationSeconds > 0
+              ? deltaSeconds / cacheFabrication.durationSeconds
+              : 1;
+          const progress = Math.min(1, cacheFabrication.progress + rate);
+          if (progress >= 1) {
+            cacheLevel = cacheFabrication.targetLevel;
+            cacheFabrication = null;
+          } else {
+            cacheFabrication = { ...cacheFabrication, progress };
+          }
+        }
+
+        if (state.cacheBuffer.length === 0) {
+          if (
+            cacheLevel !== state.cacheLevel ||
+            cacheFabrication !== state.cacheFabrication
+          ) {
+            set({ cacheLevel, cacheFabrication });
+          }
           return [];
         }
 
@@ -327,25 +537,41 @@ export const useGameStore = create<GameStoreState>()(
         let inventory = [...state.inventory];
         let credits = state.credits;
         const threshold = state.autoSalvageThreshold;
+        let pendingComparisonGear = state.pendingComparisonGear;
+        let comparisonQueue = [...state.comparisonQueue];
 
         const stillPending = buffer.filter((c) => {
           if (!completedIds.includes(c.id)) {
             return true;
           }
-          const item = generateGearItem(state.cacheLevel);
+          const item = generateGearItem(cacheLevel);
           if (threshold !== null && RARITY_RANK[item.rarity] < RARITY_RANK[threshold]) {
             credits += item.salvageValue;
           } else {
             inventory.push(item);
+            opened.push(item);
           }
-          opened.push(item);
           return false;
         });
+
+        if (opened.length > 0) {
+          const enqueued = enqueueComparison(
+            pendingComparisonGear,
+            comparisonQueue,
+            opened,
+          );
+          pendingComparisonGear = enqueued.pendingComparisonGear;
+          comparisonQueue = enqueued.comparisonQueue;
+        }
 
         set({
           cacheBuffer: stillPending,
           inventory,
           credits,
+          cacheLevel,
+          cacheFabrication,
+          pendingComparisonGear,
+          comparisonQueue,
         });
         return opened;
       },
@@ -364,7 +590,20 @@ export const useGameStore = create<GameStoreState>()(
         cacheLevel: state.cacheLevel,
         cacheSlots: state.cacheSlots,
         autoSalvageThreshold: state.autoSalvageThreshold,
+        cacheFabrication: state.cacheFabrication,
+        pendingComparisonGear: state.pendingComparisonGear,
+        comparisonQueue: state.comparisonQueue,
       }),
+      merge: (persistedState, currentState): GameStoreState => {
+        const persisted = (persistedState ?? {}) as Partial<PersistedGameSnapshot>;
+        return {
+          ...currentState,
+          ...persisted,
+          cacheFabrication: persisted.cacheFabrication ?? null,
+          pendingComparisonGear: persisted.pendingComparisonGear ?? null,
+          comparisonQueue: persisted.comparisonQueue ?? [],
+        };
+      },
     },
   ),
 );
