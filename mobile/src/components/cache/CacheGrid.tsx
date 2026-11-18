@@ -23,12 +23,14 @@ import {
   type AutoSalvageOption,
 } from '../../store/useGameStore';
 import { COLORS, FONTS, RADII } from '../../theme/colors';
+import { rarityVisual } from '../../theme/rarityVisuals';
 import {
   OPEN_CACHE_GOLD_COST,
   RARITIES,
   RARITY_RANK,
   type Rarity,
 } from '../../types/game';
+import { HoloRarityFrame } from '../ui/HoloRarityFrame';
 
 /** Lazy monetization accessors — keep ads/purchases packages off the CacheGrid module graph. */
 function getAdMobManager(): {
@@ -83,15 +85,9 @@ function formatPercent(n: number): string {
   return `${n.toFixed(1)}%`;
 }
 
-const RARITY_TINT: Readonly<Record<Rarity, string>> = {
-  COMMON: COLORS.muted,
-  UNCOMMON: COLORS.teal,
-  RARE: COLORS.cyan,
-  EPIC: COLORS.violet,
-  LEGENDARY: COLORS.amber,
-  MYTHIC: COLORS.gold,
-  CELESTIAL: COLORS.celestial,
-};
+function rarityTint(rarity: Rarity): string {
+  return rarityVisual(rarity).core;
+}
 
 export function CacheGrid(): React.ReactElement {
   const cacheLevel = useGameStore((s) => s.cacheLevel);
@@ -222,9 +218,8 @@ export function CacheGrid(): React.ReactElement {
           <View style={styles.salvageRow}>
             {AUTO_SALVAGE_OPTIONS.map((option) => {
               const active = autoSalvageThreshold === option;
-              return (
+              const chip = (
                 <Pressable
-                  key={option}
                   accessibilityRole="button"
                   accessibilityState={{ selected: active }}
                   accessibilityLabel={`Auto-salvage below ${option}`}
@@ -234,22 +229,31 @@ export function CacheGrid(): React.ReactElement {
                   style={[
                     styles.salvageChip,
                     active && styles.salvageChipActive,
-                    active && {
-                      borderColor: RARITY_TINT[option],
-                    },
+                    active && { borderColor: rarityTint(option) },
                   ]}
                 >
                   <Text
                     style={[
                       styles.salvageChipText,
-                      active && {
-                        color: RARITY_TINT[option],
-                      },
+                      active && { color: rarityTint(option) },
                     ]}
                   >
                     {option}
                   </Text>
                 </Pressable>
+              );
+              if (!active) {
+                return <React.Fragment key={option}>{chip}</React.Fragment>;
+              }
+              return (
+                <HoloRarityFrame
+                  key={option}
+                  rarity={option}
+                  style={styles.salvageHolo}
+                  shimmer
+                >
+                  {chip}
+                </HoloRarityFrame>
               );
             })}
           </View>
@@ -460,12 +464,12 @@ export function CacheGrid(): React.ReactElement {
             {RARITIES.map((rarity) => {
               const weight = dropRow.weights[rarity];
               const muted = weight <= 0;
-              return (
-                <View key={rarity} style={styles.dropRow}>
+              const row = (
+                <View style={styles.dropRowInner}>
                   <Text
                     style={[
                       styles.dropRarity,
-                      { color: muted ? COLORS.muted : RARITY_TINT[rarity] },
+                      { color: muted ? COLORS.muted : rarityTint(rarity) },
                     ]}
                   >
                     {rarity}
@@ -484,6 +488,23 @@ export function CacheGrid(): React.ReactElement {
                     {formatPercent(weight)}
                   </Text>
                 </View>
+              );
+              if (muted) {
+                return (
+                  <View key={rarity} style={styles.dropRow}>
+                    {row}
+                  </View>
+                );
+              }
+              return (
+                <HoloRarityFrame
+                  key={rarity}
+                  rarity={rarity}
+                  style={styles.dropHolo}
+                  shimmer
+                >
+                  {row}
+                </HoloRarityFrame>
               );
             })}
             <Pressable
@@ -618,6 +639,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6,
     marginTop: 6,
+  },
+  salvageHolo: {
+    flex: 1,
   },
   salvageChip: {
     flex: 1,
@@ -819,6 +843,9 @@ const styles = StyleSheet.create({
     fontSize: 8,
     letterSpacing: 0.4,
   },
+  dropHolo: {
+    marginBottom: 4,
+  },
   dropRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -826,6 +853,13 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: COLORS.border,
+  },
+  dropRowInner: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 5,
+    paddingHorizontal: 6,
   },
   dropRarity: {
     fontFamily: FONTS.mono,

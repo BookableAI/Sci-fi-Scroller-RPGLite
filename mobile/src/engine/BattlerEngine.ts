@@ -1,7 +1,8 @@
 /**
  * Sector Sentinel — fixed-timestep combat engine (outside React render).
  * Exo-Rig vs Autonomous Hostile Constructs; rewards wire into Zustand store.
- * Luminous combat VFX: hit-flash, crit micro-shake, rarity trails, credit arcs.
+ * Visual suite: biomes (3 parallax), archetypes, combat juice (flash/sparks/
+ * recoil/shatter), rarity trails, credit orbs arcing to HUD.
  */
 
 import {
@@ -26,10 +27,12 @@ const PROJECTILE_HIT_H = 10;
 const HIT_PAD = 6;
 /** Trail breadcrumb count per bolt */
 const TRAIL_LENGTH = 6;
-/** Hit-flash duration (seconds) */
-const HIT_FLASH_LIFE = 0.09;
-/** Disintegrate dissolve after lethal hit (seconds) */
-const DISINTEGRATE_LIFE = 0.42;
+/** Hit white-flash duration (seconds) — 60ms combat juice */
+const HIT_FLASH_LIFE = 0.06;
+/** Full-viewport impact flash (seconds) */
+const SCREEN_FLASH_LIFE = 0.06;
+/** Disintegrate / shatter dissolve after lethal hit (seconds) */
+const DISINTEGRATE_LIFE = 0.48;
 /** Crit chance floor / weapon-scaled bonus */
 const CRIT_BASE = 0.12;
 const CRIT_PER_WEAPON_STAT = 0.0015;
@@ -37,6 +40,14 @@ const CRIT_DAMAGE_MULT = 1.75;
 /** Camera micro-shake peak amplitude (px) + decay */
 const SHAKE_PEAK = 3.2;
 const SHAKE_DECAY = 9.5;
+/** Exo muzzle recoil (px) + recover rate */
+const RECOIL_PEAK = 5.5;
+const RECOIL_RECOVER = 28;
+/** Cap particle counts for Expo Go perf */
+const MAX_SPARKS = 28;
+const MAX_SHARDS = 24;
+const SPARKS_PER_HIT = 4;
+const SHARDS_PER_DEATH = 6;
 
 /** Trail band derived from equipped primary weapon rarity */
 export type TrailBand = 'CYAN' | 'VIOLET' | 'CELESTIAL';
@@ -63,6 +74,13 @@ export interface Vec2 {
   y: number;
 }
 
+/** Hostile silhouette archetypes (unique idle + bars) */
+export type HostileArchetype =
+  | 'SCARAB'
+  | 'AEGIS'
+  | 'VOID_WEAVER'
+  | 'SECTOR_WARDEN';
+
 export interface ExoRigState {
   x: number;
   y: number;
@@ -73,6 +91,8 @@ export interface ExoRigState {
   shieldIntegrity: number;
   /** 0–1 */
   shieldFraction: number;
+  /** Horizontal muzzle recoil offset (px, applied left) */
+  recoilX: number;
 }
 
 export interface HostileConstruct {
@@ -89,10 +109,38 @@ export interface HostileConstruct {
   powerRating: number;
   /** Sector Warden gate boss (every 5th sector level) */
   isBoss: boolean;
+  archetype: HostileArchetype;
+  /** Idle animation phase (radians / normalized) */
+  idlePhase: number;
   /** Remaining hit-flash seconds (luminous impact frame) */
   hitFlash: number;
   /** Remaining disintegrate seconds; 0 when intact */
   disintegrate: number;
+}
+
+/** Impact spark (hit juice) */
+export interface SparkParticle {
+  id: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  maxLife: number;
+}
+
+/** Death shatter shard */
+export interface ShatterShard {
+  id: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  maxLife: number;
+  width: number;
+  height: number;
+  rotation: number;
 }
 
 export interface Projectile {
@@ -156,6 +204,8 @@ export interface BattlerSnapshot {
   projectiles: readonly Projectile[];
   damageNumbers: readonly DamageNumber[];
   creditPickups: readonly CreditPickup[];
+  sparks: readonly SparkParticle[];
+  shatterShards: readonly ShatterShard[];
   parallax: readonly ParallaxLayer[];
   telemetry: CombatTelemetry;
   scrollX: number;
@@ -164,6 +214,8 @@ export interface BattlerSnapshot {
   /** Camera micro-shake offset (crit impacts) */
   cameraShakeX: number;
   cameraShakeY: number;
+  /** 0–1 remaining white impact flash over viewport */
+  screenFlash: number;
 }
 
 export type BattlerListener = (snapshot: BattlerSnapshot) => void;
@@ -199,11 +251,34 @@ const COMBAT_BALANCE = {
   bossHeight: 64,
   normalWidth: 34,
   normalHeight: 42,
+  scarabWidth: 26,
+  scarabHeight: 28,
+  aegisWidth: 44,
+  aegisHeight: 48,
+  weaverWidth: 30,
+  weaverHeight: 50,
 } as const;
 
 /** Gate boss every 5th sector level (5, 10, …). */
 export function isSectorWardenLevel(level: number): boolean {
   return level > 0 && level % 5 === 0;
+}
+
+/**
+ * Pick archetype for a sector encounter.
+ * Wardens on level % 5 === 0; otherwise rotate Scarab / Aegis / Void Weaver.
+ */
+export function archetypeForEncounter(
+  world: number,
+  level: number,
+): HostileArchetype {
+  if (isSectorWardenLevel(level)) {
+    return 'SECTOR_WARDEN';
+  }
+  const lane = (world + level) % 3;
+  if (lane === 0) return 'SCARAB';
+  if (lane === 1) return 'AEGIS';
+  return 'VOID_WEAVER';
 }
 
 function enemyStats(world: number, level: number): {
@@ -317,24 +392,27 @@ export class BattlerEngine {
     maxHp: 1000,
     shieldIntegrity: 100,
     shieldFraction: 1,
+    recoilX: 0,
   };
 
   private hostiles: HostileConstruct[] = [];
   private projectiles: Projectile[] = [];
   private damageNumbers: DamageNumber[] = [];
   private creditPickups: CreditPickup[] = [];
-  /** Depth stack: stars → far ridges → mid terrain → near plates */
+  private sparks: SparkParticle[] = [];
+  private shatterShards: ShatterShard[] = [];
+  /** Three parallax layers: far / mid / near */
   private parallax: ParallaxLayer[] = [
-    { offset: 0, speed: 8 },
-    { offset: 0, speed: 18 },
-    { offset: 0, speed: 36 },
-    { offset: 0, speed: 58 },
+    { offset: 0, speed: 14 },
+    { offset: 0, speed: 32 },
+    { offset: 0, speed: 54 },
   ];
 
   private viewportWidth = 390;
   private viewportHeight = 280;
   private shakeAmp = 0;
   private shakePhase = 0;
+  private screenFlash = 0;
 
   setViewportSize(width: number, height: number): void {
     this.viewportWidth = Math.max(1, width);
@@ -381,6 +459,8 @@ export class BattlerEngine {
       })),
       damageNumbers: this.damageNumbers.map((d) => ({ ...d })),
       creditPickups: this.creditPickups.map((c) => ({ ...c })),
+      sparks: this.sparks.map((s) => ({ ...s })),
+      shatterShards: this.shatterShards.map((s) => ({ ...s })),
       parallax: this.parallax.map((p) => ({ ...p })),
       telemetry: {
         sectorWorld: store.currentSectorWorld,
@@ -396,6 +476,7 @@ export class BattlerEngine {
       aimTargetId: target?.id ?? null,
       cameraShakeX: shake.x,
       cameraShakeY: shake.y,
+      screenFlash: this.screenFlash,
     };
   }
 
@@ -496,7 +577,11 @@ export class BattlerEngine {
     this.updateProjectiles(dt, powerRating);
     this.updateDamageNumbers(dt);
     this.updateCreditPickups(dt);
+    this.updateSparks(dt);
+    this.updateShatterShards(dt);
     this.updateShake(dt);
+    this.updateRecoil(dt);
+    this.updateScreenFlash(dt);
     this.updateDpsMeter(dt);
 
     if (this.hostiles.length === 0) {
@@ -516,26 +601,60 @@ export class BattlerEngine {
 
   private spawnHostile(): void {
     const store = useGameStore.getState();
+    const world = store.currentSectorWorld;
     const level = store.currentSectorLevel;
-    const isBoss = isSectorWardenLevel(level);
-    const stats = enemyStats(store.currentSectorWorld, level);
-    const hp = isBoss
-      ? Math.round(stats.hp * COMBAT_BALANCE.bossHpMultiplier)
-      : stats.hp;
-    const width = isBoss
-      ? COMBAT_BALANCE.bossWidth
-      : COMBAT_BALANCE.normalWidth;
-    const height = isBoss
-      ? COMBAT_BALANCE.bossHeight
-      : COMBAT_BALANCE.normalHeight;
-    const defense = isBoss
-      ? Math.round(stats.defense * 1.35)
-      : stats.defense;
-    const powerRating = isBoss
-      ? Math.round(stats.powerRating * COMBAT_BALANCE.bossHpMultiplier)
-      : stats.powerRating;
-    // Wardens advance slower — armored siege silhouette
-    const speed = isBoss ? stats.speed * 0.72 : stats.speed;
+    const archetype = archetypeForEncounter(world, level);
+    const isBoss = archetype === 'SECTOR_WARDEN';
+    const stats = enemyStats(world, level);
+
+    let width: number = COMBAT_BALANCE.normalWidth;
+    let height: number = COMBAT_BALANCE.normalHeight;
+    let hpMult = 1;
+    let defMult = 1;
+    let speedMult = 1;
+    let powerMult = 1;
+
+    switch (archetype) {
+      case 'SCARAB':
+        width = COMBAT_BALANCE.scarabWidth;
+        height = COMBAT_BALANCE.scarabHeight;
+        hpMult = 0.72;
+        defMult = 0.75;
+        speedMult = 1.35;
+        powerMult = 0.8;
+        break;
+      case 'AEGIS':
+        width = COMBAT_BALANCE.aegisWidth;
+        height = COMBAT_BALANCE.aegisHeight;
+        hpMult = 1.45;
+        defMult = 1.55;
+        speedMult = 0.78;
+        powerMult = 1.25;
+        break;
+      case 'VOID_WEAVER':
+        width = COMBAT_BALANCE.weaverWidth;
+        height = COMBAT_BALANCE.weaverHeight;
+        hpMult = 0.95;
+        defMult = 0.9;
+        speedMult = 1.05;
+        powerMult = 1.1;
+        break;
+      case 'SECTOR_WARDEN':
+        width = COMBAT_BALANCE.bossWidth;
+        height = COMBAT_BALANCE.bossHeight;
+        hpMult = COMBAT_BALANCE.bossHpMultiplier;
+        defMult = 1.35;
+        speedMult = 0.72;
+        powerMult = COMBAT_BALANCE.bossHpMultiplier;
+        break;
+      default:
+        break;
+    }
+
+    const hp = Math.round(stats.hp * hpMult);
+    const defense = Math.round(stats.defense * defMult);
+    const powerRating = Math.round(stats.powerRating * powerMult);
+    const speed = stats.speed * speedMult;
 
     this.hostiles.push({
       id: nextEntityId(),
@@ -549,6 +668,8 @@ export class BattlerEngine {
       speed,
       powerRating,
       isBoss,
+      archetype,
+      idlePhase: Math.random() * Math.PI * 2,
       hitFlash: 0,
       disintegrate: 0,
     });
@@ -568,10 +689,14 @@ export class BattlerEngine {
     this.exoRig.hp = this.exoRig.maxHp;
     this.exoRig.shieldIntegrity = 80 + store.getTotalPowerRating() * 0.25;
     this.exoRig.shieldFraction = 1;
+    this.exoRig.recoilX = 0;
     this.hostiles = [];
     this.projectiles = [];
     this.creditPickups = [];
+    this.sparks = [];
+    this.shatterShards = [];
     this.shakeAmp = 0;
+    this.screenFlash = 0;
     this.fireCooldown = 0.4;
     this.spawnHostile();
   }
@@ -584,6 +709,9 @@ export class BattlerEngine {
       if (hostile.hitFlash > 0) {
         hostile.hitFlash = Math.max(0, hostile.hitFlash - dt);
       }
+
+      // Unique idle motion per archetype
+      hostile.idlePhase += dt * idleSpeedForArchetype(hostile.archetype);
 
       // Dissolving silhouettes no longer advance or pressure the exo-rig
       if (hostile.disintegrate > 0) {
@@ -652,6 +780,9 @@ export class BattlerEngine {
     const speed = 320 + powerRating * 0.15;
     const weapon = store.equippedGear.WEAPON;
     const trailBand = trailBandForRarity(weapon?.rarity);
+
+    // Exo muzzle recoil
+    this.exoRig.recoilX = Math.min(RECOIL_PEAK, this.exoRig.recoilX + RECOIL_PEAK * 0.85);
 
     this.projectiles.push({
       id: nextEntityId(),
@@ -728,6 +859,11 @@ export class BattlerEngine {
             const dealt = isCrit ? mitigated * critDamageMult : mitigated;
             hostile.hp -= dealt;
             hostile.hitFlash = HIT_FLASH_LIFE;
+            this.screenFlash = Math.max(this.screenFlash, SCREEN_FLASH_LIFE);
+            this.spawnSparks(
+              hostile.x + hostile.width * 0.35,
+              hostile.y + hostile.height * 0.4,
+            );
             this.dpsWindowDamage += dealt;
             this.spawnDamageNumber(
               hostile.x + hostile.width * 0.25,
@@ -808,10 +944,12 @@ export class BattlerEngine {
     );
     store.applyCombatVictory(standard, gold);
 
-    // Begin luminous disintegrate; keep silhouette while credit arcs rise
+    // Begin shatter + luminous disintegrate; credit orbs arc to HUD
     hostile.hp = 0;
     hostile.disintegrate = DISINTEGRATE_LIFE;
     hostile.hitFlash = HIT_FLASH_LIFE * 1.6;
+    this.screenFlash = Math.max(this.screenFlash, SCREEN_FLASH_LIFE * 1.2);
+    this.spawnShatter(hostile);
     this.spawnCreditArcs(hostile, standard, gold);
 
     // Soft heal on sector clear (Wardens restore more hull after a gate clear)
@@ -822,6 +960,51 @@ export class BattlerEngine {
     );
   }
 
+  private spawnSparks(x: number, y: number): void {
+    const budget = Math.max(0, MAX_SPARKS - this.sparks.length);
+    const count = Math.min(SPARKS_PER_HIT, budget);
+    for (let i = 0; i < count; i += 1) {
+      const angle = -Math.PI * 0.15 + Math.random() * Math.PI * 1.1;
+      const speed = 60 + Math.random() * 110;
+      this.sparks.push({
+        id: nextEntityId(),
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 40,
+        life: 0.22 + Math.random() * 0.18,
+        maxLife: 0.35,
+      });
+    }
+  }
+
+  private spawnShatter(hostile: HostileConstruct): void {
+    const budget = Math.max(0, MAX_SHARDS - this.shatterShards.length);
+    const count = Math.min(SHARDS_PER_DEATH, budget);
+    const cx = hostile.x + hostile.width * 0.5;
+    const cy = hostile.y + hostile.height * 0.45;
+    for (let i = 0; i < count; i += 1) {
+      const angle = (Math.PI * 2 * i) / count + Math.random() * 0.4;
+      const speed = 40 + Math.random() * 90;
+      this.shatterShards.push({
+        id: nextEntityId(),
+        x: cx + (Math.random() - 0.5) * hostile.width * 0.3,
+        y: cy + (Math.random() - 0.5) * hostile.height * 0.3,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 30,
+        life: 0.4 + Math.random() * 0.25,
+        maxLife: 0.55,
+        width: 3 + (i % 3) * 2,
+        height: 2 + (i % 2),
+        rotation: Math.random() * 360,
+      });
+    }
+  }
+
+  /**
+   * Credit orbs arc toward the top HUD (telemetry strip) rather than floating
+   * randomly — reads as salvage flowing into the pilot's readout.
+   */
   private spawnCreditArcs(
     hostile: HostileConstruct,
     standard: number,
@@ -829,27 +1012,45 @@ export class BattlerEngine {
   ): void {
     const cx = hostile.x + hostile.width * 0.5;
     const cy = hostile.y + hostile.height * 0.2;
+    // HUD sink: upper-right telemetry corner
+    const hudX = this.viewportWidth * 0.82;
+    const hudY = 14;
 
+    const aimTowardHud = (
+      startX: number,
+      startY: number,
+      lateralBias: number,
+    ): { vx: number; vy: number } => {
+      const dx = hudX - startX + lateralBias;
+      const dy = hudY - startY;
+      return {
+        vx: dx * 1.15 + (Math.random() - 0.5) * 20,
+        vy: Math.min(-70, dy * 1.4) - Math.random() * 30,
+      };
+    };
+
+    const stcVel = aimTowardHud(cx - 8, cy, -18);
     this.creditPickups.push({
       id: nextEntityId(),
       kind: 'STANDARD',
       amount: standard,
       x: cx - 10,
       y: cy,
-      vx: -28 - Math.random() * 18,
-      vy: -78 - Math.random() * 24,
+      vx: stcVel.vx,
+      vy: stcVel.vy,
       life: 1.05,
       maxLife: 1.05,
     });
 
+    const gcVel = aimTowardHud(cx + 8, cy, 18);
     this.creditPickups.push({
       id: nextEntityId(),
       kind: 'GOLD',
       amount: gold,
       x: cx + 10,
       y: cy,
-      vx: 26 + Math.random() * 18,
-      vy: -86 - Math.random() * 28,
+      vx: gcVel.vx,
+      vy: gcVel.vy,
       life: 1.15,
       maxLife: 1.15,
     });
@@ -886,18 +1087,73 @@ export class BattlerEngine {
 
   private updateCreditPickups(dt: number): void {
     const next: CreditPickup[] = [];
+    const hudX = this.viewportWidth * 0.82;
+    const hudY = 14;
     for (const pickup of this.creditPickups) {
       pickup.life -= dt;
+      // Gentle steer toward HUD while arcing
+      const dx = hudX - pickup.x;
+      const dy = hudY - pickup.y;
+      pickup.vx += dx * 1.8 * dt;
+      pickup.vy += dy * 1.2 * dt;
       pickup.x += pickup.vx * dt;
       pickup.y += pickup.vy * dt;
-      // Soft arc gravity — floats up then settles
-      pickup.vy += 110 * dt;
-      pickup.vx *= 1 - 0.55 * dt;
+      pickup.vy += 55 * dt;
+      pickup.vx *= 1 - 0.35 * dt;
       if (pickup.life > 0) {
         next.push(pickup);
       }
     }
     this.creditPickups = next;
+  }
+
+  private updateSparks(dt: number): void {
+    const next: SparkParticle[] = [];
+    for (const spark of this.sparks) {
+      spark.life -= dt;
+      spark.x += spark.vx * dt;
+      spark.y += spark.vy * dt;
+      spark.vy += 180 * dt;
+      spark.vx *= 1 - 1.2 * dt;
+      if (spark.life > 0) {
+        next.push(spark);
+      }
+    }
+    this.sparks = next;
+  }
+
+  private updateShatterShards(dt: number): void {
+    const next: ShatterShard[] = [];
+    for (const shard of this.shatterShards) {
+      shard.life -= dt;
+      shard.x += shard.vx * dt;
+      shard.y += shard.vy * dt;
+      shard.vy += 140 * dt;
+      shard.rotation += 220 * dt;
+      if (shard.life > 0) {
+        next.push(shard);
+      }
+    }
+    this.shatterShards = next;
+  }
+
+  private updateRecoil(dt: number): void {
+    if (this.exoRig.recoilX <= 0) {
+      this.exoRig.recoilX = 0;
+      return;
+    }
+    this.exoRig.recoilX = Math.max(
+      0,
+      this.exoRig.recoilX - RECOIL_RECOVER * dt,
+    );
+  }
+
+  private updateScreenFlash(dt: number): void {
+    if (this.screenFlash <= 0) {
+      this.screenFlash = 0;
+      return;
+    }
+    this.screenFlash = Math.max(0, this.screenFlash - dt);
   }
 
   private updateDpsMeter(dt: number): void {
@@ -907,6 +1163,21 @@ export class BattlerEngine {
       this.dpsWindowDamage = 0;
       this.dpsWindowTime = 0;
     }
+  }
+}
+
+function idleSpeedForArchetype(archetype: HostileArchetype): number {
+  switch (archetype) {
+    case 'SCARAB':
+      return 9.5;
+    case 'AEGIS':
+      return 2.4;
+    case 'VOID_WEAVER':
+      return 4.2;
+    case 'SECTOR_WARDEN':
+      return 1.8;
+    default:
+      return 3;
   }
 }
 

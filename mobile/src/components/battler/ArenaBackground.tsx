@@ -1,16 +1,17 @@
 /**
  * Luminous science-fantasy battle arena — View-only parallax for Expo Go.
- * Layers: nebula washes → starfield → far ridges → mid terrain → near plates.
- * Caps View counts; no shadows / Animated / Skia.
+ * World biomes (W1 Obsidian Astral Ruins / W2 Crystalline Spire Wastes /
+ * W3+ Solar Forge Orbit) + 3 scrolling parallax layers (far / mid / near).
  */
 
 import React, { useMemo } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import type { ParallaxLayer } from '../../engine/BattlerEngine';
-import { COLORS } from '../../theme/colors';
+import { biomeForWorld, type BiomePalette } from '../../theme/biomes';
+import { COLORS, FONTS } from '../../theme/colors';
 
-const STAR_COUNT = 22;
+const STAR_COUNT = 18;
 const FAR_CHUNK_COUNT = 5;
 const MID_CHUNK_COUNT = 4;
 const NEAR_PLATE_COUNT = 6;
@@ -19,6 +20,8 @@ type ArenaBackgroundProps = {
   parallax: readonly ParallaxLayer[];
   width: number;
   height: number;
+  /** currentSectorWorld — drives biome palette */
+  sectorWorld: number;
 };
 
 type StarSpec = {
@@ -46,20 +49,22 @@ function wrapOffset(offset: number, period: number): number {
   return -(mod < 0 ? mod + period : mod);
 }
 
-function buildStars(width: number, height: number): StarSpec[] {
+function buildStars(
+  width: number,
+  height: number,
+  tints: readonly string[],
+): StarSpec[] {
   const skyH = height * 0.62;
   const stars: StarSpec[] = [];
   for (let i = 0; i < STAR_COUNT; i += 1) {
     const size = 1 + (i % 3);
-    const tint =
-      i % 9 === 0 ? COLORS.cyan : i % 7 === 0 ? COLORS.violet : COLORS.celestial;
     stars.push({
       key: `star-${i}`,
-      left: ((i * 97) % 1000) / 1000 * width,
-      top: ((i * 53) % 1000) / 1000 * skyH,
+      left: (((i * 97) % 1000) / 1000) * width,
+      top: (((i * 53) % 1000) / 1000) * skyH,
       size,
       opacity: 0.28 + (i % 5) * 0.1,
-      color: tint,
+      color: tints[i % tints.length] ?? COLORS.celestial,
     });
   }
   return stars;
@@ -88,47 +93,73 @@ function buildChunks(
   return chunks;
 }
 
-function AtmosphereBands({ height }: { height: number }): React.ReactElement {
+function AtmosphereBands({
+  height,
+  biome,
+}: {
+  height: number;
+  biome: BiomePalette;
+}): React.ReactElement {
   return (
     <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-      <View style={[styles.skyWash, { height: height * 0.38 }]} />
       <View
         style={[
-          styles.nebulaCyan,
+          styles.voidWash,
+          { backgroundColor: biome.voidWash },
+        ]}
+      />
+      <View
+        style={[
+          styles.skyWash,
+          { height: height * 0.38, backgroundColor: biome.skyWash },
+        ]}
+      />
+      <View
+        style={[
+          styles.nebulaBlob,
           {
             top: height * 0.08,
             left: -40,
             width: '58%',
             height: height * 0.42,
+            backgroundColor: biome.nebulaA,
           },
         ]}
       />
       <View
         style={[
-          styles.nebulaViolet,
+          styles.nebulaBlob,
           {
             top: height * 0.02,
             right: -50,
             width: '52%',
             height: height * 0.36,
+            backgroundColor: biome.nebulaB,
+            borderRadius: 140,
           },
         ]}
       />
       <View
         style={[
-          styles.nebulaTeal,
+          styles.nebulaBlob,
           {
             top: height * 0.42,
             left: '18%',
             width: '64%',
             height: height * 0.28,
+            backgroundColor: biome.nebulaC,
+            borderRadius: 100,
           },
         ]}
       />
       <View
         style={[
           styles.horizonGlow,
-          { top: height * 0.58, height: height * 0.22 },
+          {
+            top: height * 0.58,
+            height: height * 0.22,
+            backgroundColor: biome.horizon,
+          },
         ]}
       />
     </View>
@@ -139,12 +170,17 @@ function Starfield({
   width,
   height,
   offset,
+  biome,
 }: {
   width: number;
   height: number;
   offset: number;
+  biome: BiomePalette;
 }): React.ReactElement {
-  const stars = useMemo(() => buildStars(width, height), [width, height]);
+  const stars = useMemo(
+    () => buildStars(width, height, biome.starTints),
+    [width, height, biome.starTints],
+  );
   const period = Math.max(1, width);
   const shift = wrapOffset(offset, period);
 
@@ -178,14 +214,17 @@ function Starfield({
   );
 }
 
+/** Parallax layer 0 — far ridges / ruins / spires / forge silhouettes */
 function FarRidges({
   width,
   height,
   offset,
+  biome,
 }: {
   width: number;
   height: number;
   offset: number;
+  biome: BiomePalette;
 }): React.ReactElement {
   const period = Math.max(1, Math.round(width * 1.15));
   const chunks = useMemo(
@@ -198,9 +237,9 @@ function FarRidges({
         18,
         36,
         'far',
-        [COLORS.borderGlow, COLORS.violet, COLORS.teal],
+        biome.accents,
       ),
-    [period],
+    [period, biome.accents],
   );
   const shift = wrapOffset(offset, period);
   const baseTop = height * 0.52;
@@ -223,6 +262,8 @@ function FarRidges({
                   width: chunk.width,
                   height: chunk.height,
                   borderTopColor: chunk.accent,
+                  backgroundColor: biome.farFill,
+                  borderLeftColor: biome.farEdge,
                 },
               ]}
             />
@@ -233,14 +274,17 @@ function FarRidges({
   );
 }
 
+/** Parallax layer 1 — mid platforms / crystal plates / forge gantries */
 function MidTerrain({
   width,
   height,
   offset,
+  biome,
 }: {
   width: number;
   height: number;
   offset: number;
+  biome: BiomePalette;
 }): React.ReactElement {
   const period = Math.max(1, Math.round(width * 1.05));
   const chunks = useMemo(
@@ -253,9 +297,9 @@ function MidTerrain({
         14,
         28,
         'mid',
-        [COLORS.cyan, COLORS.teal, COLORS.borderGlow],
+        biome.accents,
       ),
-    [period],
+    [period, biome.accents],
   );
   const shift = wrapOffset(offset, period);
   const baseTop = height * 0.68;
@@ -278,6 +322,7 @@ function MidTerrain({
                   width: chunk.width,
                   height: chunk.height,
                   borderColor: chunk.accent,
+                  backgroundColor: biome.midFill,
                 },
               ]}
             >
@@ -295,14 +340,17 @@ function MidTerrain({
   );
 }
 
+/** Parallax layer 2 — near ground plates */
 function NearGround({
   width,
   height,
   offset,
+  biome,
 }: {
   width: number;
   height: number;
   offset: number;
+  biome: BiomePalette;
 }): React.ReactElement {
   const period = Math.max(1, Math.round(width * 0.9));
   const plates = useMemo(
@@ -315,9 +363,9 @@ function NearGround({
         6,
         10,
         'near',
-        [COLORS.cyan, COLORS.teal, COLORS.violet],
+        biome.accents,
       ),
-    [period],
+    [period, biome.accents],
   );
   const shift = wrapOffset(offset, period);
   const groundTop = height * 0.78;
@@ -328,13 +376,21 @@ function NearGround({
       <View
         style={[
           styles.groundPlane,
-          { top: groundTop, height: groundHeight },
+          {
+            top: groundTop,
+            height: groundHeight,
+            backgroundColor: biome.groundPlane,
+          },
         ]}
       />
       <View
         style={[
           styles.groundEdge,
-          { top: groundTop, width },
+          {
+            top: groundTop,
+            width,
+            backgroundColor: biome.groundEdge,
+          },
         ]}
       />
       {[0, 1].map((copy) => (
@@ -360,6 +416,7 @@ function NearGround({
                   width: plate.width,
                   height: plate.height,
                   borderColor: plate.accent,
+                  backgroundColor: biome.nearFill,
                 },
               ]}
             />
@@ -370,13 +427,26 @@ function NearGround({
   );
 }
 
-function HorizonScan({ width, height }: { width: number; height: number }): React.ReactElement {
+function HorizonScan({
+  width,
+  height,
+  biome,
+}: {
+  width: number;
+  height: number;
+  biome: BiomePalette;
+}): React.ReactElement {
   return (
     <View pointerEvents="none" style={StyleSheet.absoluteFill}>
       <View
         style={[
           styles.scanLine,
-          { top: height * 0.34, width, opacity: 0.12 },
+          {
+            top: height * 0.34,
+            width,
+            opacity: 0.12,
+            backgroundColor: biome.scan,
+          },
         ]}
       />
       <View
@@ -386,10 +456,13 @@ function HorizonScan({ width, height }: { width: number; height: number }): Reac
             top: height * 0.72,
             width,
             opacity: 0.18,
-            backgroundColor: COLORS.teal,
+            backgroundColor: biome.scan,
           },
         ]}
       />
+      <Text style={[styles.biomeTag, { color: biome.scan }]} numberOfLines={1}>
+        {biome.label}
+      </Text>
     </View>
   );
 }
@@ -398,11 +471,13 @@ export function ArenaBackground({
   parallax,
   width,
   height,
+  sectorWorld,
 }: ArenaBackgroundProps): React.ReactElement {
-  const layer0 = parallax[0]?.offset ?? 0;
-  const layer1 = parallax[1]?.offset ?? layer0 * 1.6;
-  const layer2 = parallax[2]?.offset ?? layer1 * 1.5;
-  const layer3 = parallax[3]?.offset ?? layer2 * 1.4;
+  const biome = useMemo(() => biomeForWorld(sectorWorld), [sectorWorld]);
+  // Three parallax layers: far / mid / near (stars ride far offset slowly)
+  const far = parallax[0]?.offset ?? 0;
+  const mid = parallax[1]?.offset ?? far * 1.8;
+  const near = parallax[2]?.offset ?? mid * 1.5;
 
   if (width <= 0 || height <= 0) {
     return <View />;
@@ -410,12 +485,12 @@ export function ArenaBackground({
 
   return (
     <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-      <AtmosphereBands height={height} />
-      <Starfield width={width} height={height} offset={layer0} />
-      <FarRidges width={width} height={height} offset={layer1} />
-      <MidTerrain width={width} height={height} offset={layer2} />
-      <NearGround width={width} height={height} offset={layer3} />
-      <HorizonScan width={width} height={height} />
+      <AtmosphereBands height={height} biome={biome} />
+      <Starfield width={width} height={height} offset={far * 0.45} biome={biome} />
+      <FarRidges width={width} height={height} offset={far} biome={biome} />
+      <MidTerrain width={width} height={height} offset={mid} biome={biome} />
+      <NearGround width={width} height={height} offset={near} biome={biome} />
+      <HorizonScan width={width} height={height} biome={biome} />
     </View>
   );
 }
@@ -426,48 +501,35 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
   },
+  voidWash: {
+    ...StyleSheet.absoluteFill,
+  },
   skyWash: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(18, 36, 72, 0.45)',
   },
-  nebulaCyan: {
+  nebulaBlob: {
     position: 'absolute',
-    backgroundColor: 'rgba(56, 189, 248, 0.10)',
     borderRadius: 120,
-  },
-  nebulaViolet: {
-    position: 'absolute',
-    backgroundColor: 'rgba(167, 139, 250, 0.09)',
-    borderRadius: 140,
-  },
-  nebulaTeal: {
-    position: 'absolute',
-    backgroundColor: 'rgba(45, 212, 191, 0.07)',
-    borderRadius: 100,
   },
   horizonGlow: {
     position: 'absolute',
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(45, 212, 191, 0.08)',
   },
   star: {
     position: 'absolute',
   },
   farRidge: {
     position: 'absolute',
-    backgroundColor: 'rgba(20, 28, 46, 0.85)',
     borderTopWidth: 1,
     borderLeftWidth: 1,
-    borderLeftColor: 'rgba(61, 79, 120, 0.55)',
     borderRadius: 2,
   },
   midPlatform: {
     position: 'absolute',
-    backgroundColor: 'rgba(26, 36, 56, 0.92)',
     borderWidth: 1,
     borderRadius: 3,
     overflow: 'hidden',
@@ -485,13 +547,11 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(10, 16, 28, 0.94)',
   },
   groundEdge: {
     position: 'absolute',
     left: 0,
     height: 2,
-    backgroundColor: 'rgba(45, 212, 191, 0.55)',
   },
   nearPlate: {
     position: 'absolute',
@@ -499,13 +559,20 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: COLORS.border,
-    backgroundColor: 'rgba(30, 44, 68, 0.75)',
   },
   scanLine: {
     position: 'absolute',
     left: 0,
     height: StyleSheet.hairlineWidth,
-    backgroundColor: COLORS.cyan,
+  },
+  biomeTag: {
+    position: 'absolute',
+    right: 10,
+    bottom: 8,
+    fontFamily: FONTS.mono,
+    fontSize: 8,
+    letterSpacing: 0.8,
+    opacity: 0.55,
   },
 });
 

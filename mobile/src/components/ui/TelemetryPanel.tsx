@@ -10,6 +10,7 @@ import {
   useGameStore,
 } from '../../store/useGameStore';
 import { COLORS, FONTS, RADII } from '../../theme/colors';
+import { rarityVisual } from '../../theme/rarityVisuals';
 import {
   AFFINITY_BADGE,
   computeAffinityCombatBonuses,
@@ -22,6 +23,7 @@ import {
   type ManufacturerAffinity,
   type TargetingProtocol,
 } from '../../types/game';
+import { HoloRarityFrame } from './HoloRarityFrame';
 
 function AffinityBadge({
   affinity,
@@ -60,8 +62,8 @@ function LoadoutCell({
   slot: GearSlot;
   item: GearItem | undefined;
 }): React.ReactElement {
-  return (
-    <View style={[styles.cell, item ? styles.cellFilled : null]}>
+  const content = (
+    <>
       <Text style={styles.cellSlot}>{SLOT_SHORT[slot]}</Text>
       {item ? (
         <>
@@ -70,14 +72,31 @@ function LoadoutCell({
           </Text>
           <Text style={styles.cellPr}>{`PR ${item.powerRating}`}</Text>
           <View style={styles.cellMetaRow}>
-            <Text style={styles.cellRarity}>{item.rarity}</Text>
+            <Text
+              style={[
+                styles.cellRarity,
+                { color: rarityVisual(item.rarity).core },
+              ]}
+            >
+              {item.rarity}
+            </Text>
             <AffinityBadge affinity={item.affinity} compact />
           </View>
         </>
       ) : (
         <Text style={styles.cellEmpty}>STANDBY</Text>
       )}
-    </View>
+    </>
+  );
+
+  if (!item) {
+    return <View style={styles.cell}>{content}</View>;
+  }
+
+  return (
+    <HoloRarityFrame rarity={item.rarity} style={styles.cellHolo} shimmer>
+      <View style={styles.cellInner}>{content}</View>
+    </HoloRarityFrame>
   );
 }
 
@@ -269,8 +288,14 @@ const styles = StyleSheet.create({
     borderRadius: RADII.sm,
     padding: 6,
   },
-  cellFilled: {
-    borderColor: COLORS.teal,
+  cellHolo: {
+    width: '32%',
+    minHeight: 68,
+    backgroundColor: COLORS.void,
+  },
+  cellInner: {
+    padding: 6,
+    minHeight: 68,
   },
   cellSlot: {
     color: COLORS.muted,
