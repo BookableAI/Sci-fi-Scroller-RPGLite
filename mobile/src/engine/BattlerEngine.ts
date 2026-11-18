@@ -5,7 +5,12 @@
  */
 
 import { useGameStore } from '../store/useGameStore';
-import type { Rarity, TargetingProtocol } from '../types/game';
+import {
+  computeAffinityCombatBonuses,
+  type AffinityCombatBonuses,
+  type Rarity,
+  type TargetingProtocol,
+} from '../types/game';
 
 export const TARGET_FPS = 60;
 export const FIXED_DT = 1 / TARGET_FPS;
@@ -619,6 +624,10 @@ export class BattlerEngine {
     this.hostiles = surviving;
   }
 
+  private resolveAffinityBonuses(): AffinityCombatBonuses {
+    return computeAffinityCombatBonuses(useGameStore.getState().equippedGear);
+  }
+
   private updatePlayerFire(dt: number, powerRating: number): void {
     this.fireCooldown -= dt;
     const store = useGameStore.getState();
@@ -629,9 +638,14 @@ export class BattlerEngine {
       return;
     }
 
+    const affinity = this.resolveAffinityBonuses();
     const fireRate =
-      COMBAT_BALANCE.fireRateBase +
-      Math.min(COMBAT_BALANCE.fireRateCapBonus, powerRating / COMBAT_BALANCE.fireRatePrDivisor);
+      (COMBAT_BALANCE.fireRateBase +
+        Math.min(
+          COMBAT_BALANCE.fireRateCapBonus,
+          powerRating / COMBAT_BALANCE.fireRatePrDivisor,
+        )) *
+      affinity.fireRateMult;
     this.fireCooldown = 1 / fireRate;
     const damage = Math.max(
       COMBAT_BALANCE.shotDamageMin,
@@ -668,10 +682,12 @@ export class BattlerEngine {
     const remaining: Projectile[] = [];
     const boltSpeed = 320 + powerRating * 0.15;
     const weapon = useGameStore.getState().equippedGear.WEAPON;
+    const affinity = this.resolveAffinityBonuses();
     const critChance = Math.min(
       0.42,
       CRIT_BASE + (weapon?.primaryStat ?? 0) * CRIT_PER_WEAPON_STAT,
     );
+    const critDamageMult = CRIT_DAMAGE_MULT * affinity.critDamageMult;
 
     for (const shot of this.projectiles) {
       if (shot.fromPlayer && shot.targetId !== null) {
@@ -719,7 +735,7 @@ export class BattlerEngine {
               shot.damage - hostile.defense * COMBAT_BALANCE.defenseMitigation,
             );
             const isCrit = Math.random() < critChance;
-            const dealt = isCrit ? mitigated * CRIT_DAMAGE_MULT : mitigated;
+            const dealt = isCrit ? mitigated * critDamageMult : mitigated;
             hostile.hp -= dealt;
             hostile.hitFlash = HIT_FLASH_LIFE;
             this.dpsWindowDamage += dealt;
@@ -784,6 +800,7 @@ export class BattlerEngine {
   private resolveKill(hostile: HostileConstruct, powerRating: number): void {
     const store = useGameStore.getState();
     const rewardMult = hostile.isBoss ? COMBAT_BALANCE.bossRewardMultiplier : 1;
+    const affinity = this.resolveAffinityBonuses();
     const standard = Math.round(
       standardCreditsForKill(
         store.currentSectorWorld,
@@ -795,7 +812,9 @@ export class BattlerEngine {
       goldCreditsForKill(
         store.currentSectorWorld,
         store.currentSectorLevel,
-      ) * rewardMult,
+      ) *
+        rewardMult *
+        affinity.goldCreditYieldMult,
     );
     store.applyCombatVictory(standard, gold);
 

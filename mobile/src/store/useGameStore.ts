@@ -7,6 +7,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
 
 import {
+  ensureGearAffinity,
   generateGearItem,
   getUpgradeRequirements,
 } from '../engine/ProbabilityMatrix';
@@ -18,6 +19,7 @@ import {
   OVERCLOCK_SPEED_MULTIPLIER,
 } from '../types/monetization';
 import {
+  GEAR_SLOTS,
   OPEN_CACHE_GOLD_COST,
   RARITY_RANK,
   type CacheFabricationJob,
@@ -29,6 +31,28 @@ import {
   type TargetingProtocol,
   type TelemetryStats,
 } from '../types/game';
+
+/** Migrate inventory / equipped / comparison gear to include manufacturer affinity. */
+function migrateGearCollection(items: Inventory | undefined): Inventory {
+  if (!items || items.length === 0) {
+    return items ?? [];
+  }
+  return items.map((item) => ensureGearAffinity(item));
+}
+
+function migrateEquippedGear(equipped: EquippedGear | undefined): EquippedGear {
+  if (!equipped) {
+    return {};
+  }
+  const next: EquippedGear = {};
+  for (const slot of GEAR_SLOTS) {
+    const item = equipped[slot];
+    if (item) {
+      next[slot] = ensureGearAffinity(item);
+    }
+  }
+  return next;
+}
 
 export interface NanitePackGrant {
   cores: number;
@@ -731,16 +755,21 @@ export const useGameStore = create<GameStoreState>()(
         const goldCredits =
           raw.goldCredits ?? currentState.goldCredits;
 
+        const pendingRaw = raw.pendingComparisonGear ?? null;
         return {
           ...currentState,
           ...raw,
           standardCredits,
           goldCredits,
+          inventory: migrateGearCollection(raw.inventory),
+          equippedGear: migrateEquippedGear(raw.equippedGear),
           autoDecryptEnabled: raw.autoDecryptEnabled ?? false,
           autoSalvageThreshold: raw.autoSalvageThreshold ?? null,
           cacheFabrication: raw.cacheFabrication ?? null,
-          pendingComparisonGear: raw.pendingComparisonGear ?? null,
-          comparisonQueue: raw.comparisonQueue ?? [],
+          pendingComparisonGear: pendingRaw
+            ? ensureGearAffinity(pendingRaw)
+            : null,
+          comparisonQueue: migrateGearCollection(raw.comparisonQueue),
           overclockExpiresAtMs: raw.overclockExpiresAtMs ?? null,
           targetingProtocol: raw.targetingProtocol ?? 'CLOSEST',
         };

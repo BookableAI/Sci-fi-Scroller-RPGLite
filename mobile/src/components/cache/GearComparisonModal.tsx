@@ -14,7 +14,23 @@ import {
 
 import { useGameStore } from '../../store/useGameStore';
 import { COLORS, FONTS, RADII } from '../../theme/colors';
-import type { GearItem } from '../../types/game';
+import {
+  AFFINITY_BADGE,
+  type GearItem,
+  type ManufacturerAffinity,
+} from '../../types/game';
+
+function AffinityBadge({
+  affinity,
+}: {
+  affinity: ManufacturerAffinity;
+}): React.ReactElement {
+  return (
+    <View style={styles.affinityBadge}>
+      <Text style={styles.affinityBadgeText}>{AFFINITY_BADGE[affinity]}</Text>
+    </View>
+  );
+}
 
 const SLOT_LABEL: Readonly<Record<GearItem['slot'], string>> = {
   WEAPON: 'PRIMARY WEAPON',
@@ -64,7 +80,13 @@ function GearColumn({
           <Text style={styles.itemName} numberOfLines={2}>
             {item.name}
           </Text>
-          <Text style={styles.meta}>{item.rarity}</Text>
+          <View style={styles.metaRow}>
+            <Text style={styles.meta}>{item.rarity}</Text>
+            <AffinityBadge affinity={item.affinity} />
+          </View>
+          <Text style={styles.affinityFull} numberOfLines={1}>
+            {item.affinity}
+          </Text>
           <Text style={styles.stat}>{`PR  ${item.powerRating}`}</Text>
           <Text style={styles.stat}>{`PRI ${item.primaryStat}`}</Text>
           <Text style={styles.stat}>{`SEC ${item.secondaryStat}`}</Text>
@@ -306,10 +328,36 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginBottom: 4,
   },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 2,
+  },
   meta: {
     color: COLORS.violet,
     fontFamily: FONTS.mono,
     fontSize: 10,
+  },
+  affinityBadge: {
+    borderWidth: 1,
+    borderColor: COLORS.teal,
+    borderRadius: RADII.sm,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  affinityBadgeText: {
+    color: COLORS.teal,
+    fontFamily: FONTS.mono,
+    fontSize: 8,
+    letterSpacing: 0.6,
+  },
+  affinityFull: {
+    color: COLORS.muted,
+    fontFamily: FONTS.mono,
+    fontSize: 8,
+    letterSpacing: 0.4,
     marginBottom: 6,
   },
   stat: {

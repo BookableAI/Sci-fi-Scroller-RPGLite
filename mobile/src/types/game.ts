@@ -26,6 +26,62 @@ export const GEAR_SLOTS = [
 
 export type GearSlot = (typeof GEAR_SLOTS)[number];
 
+/** Manufacturer affinities — drive 2/4/6-piece set resonance bonuses */
+export const MANUFACTURER_AFFINITIES = [
+  'AETHER-DYNAMICS',
+  'KINETIC-FORGE',
+  'VOID-SYNTH',
+] as const;
+
+export type ManufacturerAffinity = (typeof MANUFACTURER_AFFINITIES)[number];
+
+/** Compact badge labels for loadout / comparison chrome */
+export const AFFINITY_BADGE: Readonly<Record<ManufacturerAffinity, string>> = {
+  'AETHER-DYNAMICS': 'AETH',
+  'KINETIC-FORGE': 'KFRG',
+  'VOID-SYNTH': 'VOID',
+};
+
+/** Piece thresholds that unlock resonance tiers */
+export const AFFINITY_RESONANCE_TIERS = [2, 4, 6] as const;
+
+export type AffinityResonanceTier = (typeof AFFINITY_RESONANCE_TIERS)[number] | 0;
+
+/**
+ * Signature set bonus per manufacturer (activates at ≥2 matching pieces).
+ * AETHER-DYNAMICS → fire rate · KINETIC-FORGE → Gold Credit yield · VOID-SYNTH → crit damage
+ */
+export const AFFINITY_SET_BONUS: Readonly<
+  Record<
+    ManufacturerAffinity,
+    Readonly<{
+      fireRateBonus: number;
+      goldCreditYieldBonus: number;
+      critDamageBonus: number;
+      label: string;
+    }>
+  >
+> = {
+  'AETHER-DYNAMICS': {
+    fireRateBonus: 0.15,
+    goldCreditYieldBonus: 0,
+    critDamageBonus: 0,
+    label: '+15% FIRE RATE',
+  },
+  'KINETIC-FORGE': {
+    fireRateBonus: 0,
+    goldCreditYieldBonus: 0.2,
+    critDamageBonus: 0,
+    label: '+20% GC YIELD',
+  },
+  'VOID-SYNTH': {
+    fireRateBonus: 0,
+    goldCreditYieldBonus: 0,
+    critDamageBonus: 0.25,
+    label: '+25% CRIT DMG',
+  },
+};
+
 export interface GearItem {
   id: string;
   name: string;
@@ -36,6 +92,8 @@ export interface GearItem {
   secondaryStat: number;
   /** Salvage payout in Standard Credits */
   salvageValue: number;
+  /** Manufacturer affinity for set resonance */
+  affinity: ManufacturerAffinity;
 }
 
 export type EquippedGear = Partial<Record<GearSlot, GearItem>>;
@@ -137,4 +195,100 @@ export interface TelemetryStats {
   kineticOutput: number;
   deflectionIndex: number;
   coreProcessingSpeed: number;
+}
+
+/** Per-affinity piece count + unlocked resonance tier (0 / 2 / 4 / 6) */
+export interface AffinityResonanceStatus {
+  affinity: ManufacturerAffinity;
+  pieces: number;
+  tier: AffinityResonanceTier;
+  /** True when ≥2 pieces — signature set bonus is live */
+  active: boolean;
+  bonusLabel: string;
+}
+
+/** Aggregated combat multipliers from equipped affinity sets */
+export interface AffinityCombatBonuses {
+  fireRateMult: number;
+  goldCreditYieldMult: number;
+  critDamageMult: number;
+  resonance: readonly AffinityResonanceStatus[];
+}
+
+/** Highest unlocked resonance tier for a piece count (0 if below 2). */
+export function resonanceTierForPieces(pieces: number): AffinityResonanceTier {
+  if (pieces >= 6) return 6;
+  if (pieces >= 4) return 4;
+  if (pieces >= 2) return 2;
+  return 0;
+}
+
+export function isManufacturerAffinity(
+  value: unknown,
+): value is ManufacturerAffinity {
+  return (
+    typeof value === 'string' &&
+    (MANUFACTURER_AFFINITIES as readonly string[]).includes(value)
+  );
+}
+
+/** Count equipped pieces per manufacturer affinity. */
+export function countEquippedAffinities(
+  equipped: EquippedGear,
+): Record<ManufacturerAffinity, number> {
+  const counts: Record<ManufacturerAffinity, number> = {
+    'AETHER-DYNAMICS': 0,
+    'KINETIC-FORGE': 0,
+    'VOID-SYNTH': 0,
+  };
+  for (const item of Object.values(equipped)) {
+    if (!item) continue;
+    const affinity = isManufacturerAffinity(item.affinity)
+      ? item.affinity
+      : null;
+    if (affinity) {
+      counts[affinity] += 1;
+    }
+  }
+  return counts;
+}
+
+/**
+ * Resolve 2/4/6-piece resonance + stacked set multipliers from the loadout.
+ * Each manufacturer contributes its signature bonus when ≥2 pieces are equipped.
+ */
+export function computeAffinityCombatBonuses(
+  equipped: EquippedGear,
+): AffinityCombatBonuses {
+  const counts = countEquippedAffinities(equipped);
+  let fireRateMult = 1;
+  let goldCreditYieldMult = 1;
+  let critDamageMult = 1;
+  const resonance: AffinityResonanceStatus[] = [];
+
+  for (const affinity of MANUFACTURER_AFFINITIES) {
+    const pieces = counts[affinity];
+    const tier = resonanceTierForPieces(pieces);
+    const active = pieces >= 2;
+    const spec = AFFINITY_SET_BONUS[affinity];
+    if (active) {
+      fireRateMult += spec.fireRateBonus;
+      goldCreditYieldMult += spec.goldCreditYieldBonus;
+      critDamageMult += spec.critDamageBonus;
+    }
+    resonance.push({
+      affinity,
+      pieces,
+      tier,
+      active,
+      bonusLabel: spec.label,
+    });
+  }
+
+  return {
+    fireRateMult,
+    goldCreditYieldMult,
+    critDamageMult,
+    resonance,
+  };
 }
