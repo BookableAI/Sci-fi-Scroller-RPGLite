@@ -1,14 +1,9 @@
 /**
  * AdMob interstitial + rewarded pipeline.
  * Interstitials: every 5th sector clear; preload at X-4 / X-9; skip if no_ads.
+ *
+ * Soft-fails in Expo Go / when the native module is unavailable (dev client required).
  */
-
-import {
-  AdEventType,
-  InterstitialAd,
-  RewardedAd,
-  RewardedAdEventType,
-} from 'react-native-google-mobile-ads';
 
 import {
   OVERCLOCK_DURATION_MS,
@@ -16,10 +11,43 @@ import {
 } from '../types/monetization';
 import { useGameStore } from '../store/useGameStore';
 import { AdUnitIds } from './monetizationConfig';
+import { hasCustomNativeModules } from './nativeAvailability';
 import { PurchaseManager } from './PurchaseManager';
 
-type InterstitialHandle = ReturnType<typeof InterstitialAd.createForAdRequest>;
-type RewardedHandle = ReturnType<typeof RewardedAd.createForAdRequest>;
+type AdsModule = typeof import('react-native-google-mobile-ads');
+type InterstitialHandle = ReturnType<AdsModule['InterstitialAd']['createForAdRequest']>;
+type RewardedHandle = ReturnType<AdsModule['RewardedAd']['createForAdRequest']>;
+
+let adsModule: AdsModule | null | undefined;
+let unavailableLogged = false;
+
+function loadAdsModule(): AdsModule | null {
+  if (adsModule !== undefined) {
+    return adsModule;
+  }
+  if (!hasCustomNativeModules()) {
+    adsModule = null;
+    return adsModule;
+  }
+  try {
+    // Native-only; require so Expo Go can boot without the module linked.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    adsModule = require('react-native-google-mobile-ads') as AdsModule;
+  } catch {
+    adsModule = null;
+  }
+  return adsModule;
+}
+
+function warnUnavailable(action: string): void {
+  if (!unavailableLogged) {
+    unavailableLogged = true;
+    console.warn(
+      `[AdMobManager] react-native-google-mobile-ads unavailable (${action}). ` +
+        'Ads require a custom Expo dev client / EAS build, not Expo Go.',
+    );
+  }
+}
 
 let interstitial: InterstitialHandle | null = null;
 let interstitialLoaded = false;
@@ -40,19 +68,24 @@ function detachRewarded(): void {
 }
 
 function createAndLoadInterstitial(): void {
+  const ads = loadAdsModule();
+  if (!ads) {
+    warnUnavailable('createInterstitial');
+    return;
+  }
   detachInterstitial();
-  const ad = InterstitialAd.createForAdRequest(AdUnitIds.interstitial, {
+  const ad = ads.InterstitialAd.createForAdRequest(AdUnitIds.interstitial, {
     requestNonPersonalizedAdsOnly: true,
   });
   interstitial = ad;
 
-  ad.addAdEventListener(AdEventType.LOADED, () => {
+  ad.addAdEventListener(ads.AdEventType.LOADED, () => {
     interstitialLoaded = true;
   });
-  ad.addAdEventListener(AdEventType.ERROR, () => {
+  ad.addAdEventListener(ads.AdEventType.ERROR, () => {
     detachInterstitial();
   });
-  ad.addAdEventListener(AdEventType.CLOSED, () => {
+  ad.addAdEventListener(ads.AdEventType.CLOSED, () => {
     interstitialShowing = false;
     detachInterstitial();
   });
@@ -61,25 +94,30 @@ function createAndLoadInterstitial(): void {
 }
 
 function createAndLoadRewarded(): void {
+  const ads = loadAdsModule();
+  if (!ads) {
+    warnUnavailable('createRewarded');
+    return;
+  }
   detachRewarded();
-  const ad = RewardedAd.createForAdRequest(AdUnitIds.rewarded, {
+  const ad = ads.RewardedAd.createForAdRequest(AdUnitIds.rewarded, {
     requestNonPersonalizedAdsOnly: true,
   });
   rewarded = ad;
 
-  ad.addAdEventListener(AdEventType.LOADED, () => {
+  ad.addAdEventListener(ads.AdEventType.LOADED, () => {
     rewardedLoaded = true;
   });
-  ad.addAdEventListener(AdEventType.ERROR, () => {
+  ad.addAdEventListener(ads.AdEventType.ERROR, () => {
     detachRewarded();
     pendingReward = null;
   });
-  ad.addAdEventListener(AdEventType.CLOSED, () => {
+  ad.addAdEventListener(ads.AdEventType.CLOSED, () => {
     detachRewarded();
     // Keep a warm rewarded ready for the next request
     createAndLoadRewarded();
   });
-  ad.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
+  ad.addAdEventListener(ads.RewardedAdEventType.EARNED_REWARD, () => {
     const kind = pendingReward;
     pendingReward = null;
     if (kind === 'OVERCLOCK') {
@@ -102,10 +140,18 @@ function shouldShowInterstitialForCompletedLevel(completedLevel: number): boolea
 }
 
 export const AdMobManager = {
-  /** Warm interstitial + rewarded once at app start. */
+  /** Warm interstitial + rewarded once at app start. Soft-fails without native ads. */
   initialize(): void {
-    createAndLoadInterstitial();
-    createAndLoadRewarded();
+    try {
+      if (!loadAdsModule()) {
+        warnUnavailable('initialize');
+        return;
+      }
+      createAndLoadInterstitial();
+      createAndLoadRewarded();
+    } catch (error) {
+      console.warn('[AdMobManager] initialize soft-failed', error);
+    }
   },
 
   /**
@@ -134,6 +180,10 @@ export const AdMobManager = {
   },
 
   async showInterstitial(): Promise<boolean> {
+    if (!loadAdsModule()) {
+      warnUnavailable('showInterstitial');
+      return false;
+    }
     if (interstitialShowing) {
       return false;
     }
@@ -165,6 +215,10 @@ export const AdMobManager = {
   },
 
   async showRewarded(kind: RewardedAdKind): Promise<boolean> {
+    if (!loadAdsModule()) {
+      warnUnavailable('showRewarded');
+      return false;
+    }
     if (!rewarded || !rewardedLoaded) {
       createAndLoadRewarded();
       return false;
@@ -195,5 +249,10 @@ export const AdMobManager = {
 
   isRewardedReady(): boolean {
     return rewardedLoaded;
+  },
+
+  /** True when the native AdMob module is linked (dev client / store build). */
+  isNativeAvailable(): boolean {
+    return loadAdsModule() !== null;
   },
 } as const;

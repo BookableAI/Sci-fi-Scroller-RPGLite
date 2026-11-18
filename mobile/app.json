@@ -4,7 +4,10 @@
     "slug": "sector-sentinel",
     "version": "0.1.0",
     "sdkVersion": "52.0.0",
-    "platforms": ["ios", "android"],
+    "platforms": [
+      "ios",
+      "android"
+    ],
     "ios": {
       "bundleIdentifier": "com.sectorsentinel.app"
     },
@@ -19,7 +22,7 @@
           "iosAppId": "ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY"
         }
       ],
-      "react-native-purchases"
+      "expo-asset"
     ]
   }
 }
