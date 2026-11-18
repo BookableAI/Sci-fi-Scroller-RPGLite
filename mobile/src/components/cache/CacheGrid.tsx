@@ -11,6 +11,8 @@ import {
 } from 'react-native';
 
 import { getUpgradeRequirements } from '../../engine/ProbabilityMatrix';
+import { AdMobManager } from '../../services/AdMobManager';
+import { PurchaseManager } from '../../services/PurchaseManager';
 import {
   getBatchCapacity,
   useGameStore,
@@ -106,11 +108,18 @@ export function CacheGrid(): React.ReactElement {
   const credits = useGameStore((s) => s.credits);
   const world = useGameStore((s) => s.currentSectorWorld);
   const fabrication = useGameStore((s) => s.cacheFabrication);
+  const overclockExpiresAtMs = useGameStore((s) => s.overclockExpiresAtMs);
   const decryptCache = useGameStore((s) => s.decryptCache);
   const upgradeCacheLevel = useGameStore((s) => s.upgradeCacheLevel);
   const tickDecryption = useGameStore((s) => s.tickDecryption);
 
   const lastTickRef = useRef<number>(Date.now());
+  const overclockActive =
+    overclockExpiresAtMs !== null && overclockExpiresAtMs > Date.now();
+  const overclockRemainSec =
+    overclockActive && overclockExpiresAtMs !== null
+      ? Math.max(0, Math.ceil((overclockExpiresAtMs - Date.now()) / 1000))
+      : 0;
 
   useEffect(() => {
     lastTickRef.current = Date.now();
@@ -228,6 +237,85 @@ export function CacheGrid(): React.ReactElement {
             )}
           </Pressable>
         )}
+
+        {fabrication !== null && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Instant Fabrication Skip rewarded ad"
+            onPress={() => {
+              void AdMobManager.showFabricationSkipRewarded();
+            }}
+            style={styles.rewardBtn}
+          >
+            <Text style={styles.rewardBtnText}>INSTANT FABRICATION SKIP</Text>
+            <Text style={styles.rewardBtnMeta}>REWARDED VIDEO</Text>
+          </Pressable>
+        )}
+      </View>
+
+      <View style={styles.monetizationPanel}>
+        <Text style={styles.monetizationTitle}>SYSTEM PROTOCOLS</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="System Overclock rewarded ad"
+          disabled={overclockActive}
+          onPress={() => {
+            void AdMobManager.showOverclockRewarded();
+          }}
+          style={[styles.rewardBtn, overclockActive && styles.upgradeBtnDisabled]}
+        >
+          <Text
+            style={[
+              styles.rewardBtnText,
+              overclockActive && styles.upgradeBtnTextDisabled,
+            ]}
+          >
+            {overclockActive
+              ? `OVERCLOCK 2X · ${formatTimer(overclockRemainSec)}`
+              : 'SYSTEM OVERCLOCK 2X (20M)'}
+          </Text>
+          <Text
+            style={[
+              styles.rewardBtnMeta,
+              overclockActive && styles.upgradeBtnTextDisabled,
+            ]}
+          >
+            REWARDED VIDEO
+          </Text>
+        </Pressable>
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Remove interstitial ads"
+          onPress={() => {
+            void PurchaseManager.purchaseRemoveAds();
+          }}
+          style={styles.iapBtn}
+        >
+          <Text style={styles.iapBtnText}>REMOVE INTERSTITIAL ADS</Text>
+        </Pressable>
+        <View style={styles.iapRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Nanite cache pack small"
+            onPress={() => {
+              void PurchaseManager.purchaseNanitePackSmall();
+            }}
+            style={[styles.iapBtn, styles.iapHalf]}
+          >
+            <Text style={styles.iapBtnText}>NANITE PACK S</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Nanite cache pack large"
+            onPress={() => {
+              void PurchaseManager.purchaseNanitePackLarge();
+            }}
+            style={[styles.iapBtn, styles.iapHalf]}
+          >
+            <Text style={styles.iapBtnText}>NANITE PACK L</Text>
+          </Pressable>
+        </View>
       </View>
     </View>
   );
@@ -398,5 +486,59 @@ const styles = StyleSheet.create({
     fontSize: 10,
     textAlign: 'center',
     paddingVertical: 8,
+  },
+  monetizationPanel: {
+    marginTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    paddingTop: 10,
+    gap: 8,
+  },
+  monetizationTitle: {
+    color: COLORS.muted,
+    fontFamily: 'Courier',
+    fontSize: 10,
+    letterSpacing: 1,
+    marginBottom: 2,
+  },
+  rewardBtn: {
+    borderWidth: 1,
+    borderColor: COLORS.amber,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  rewardBtnText: {
+    color: COLORS.amber,
+    fontFamily: 'Courier',
+    fontSize: 10,
+    letterSpacing: 0.6,
+  },
+  rewardBtnMeta: {
+    marginTop: 2,
+    color: COLORS.muted,
+    fontFamily: 'Courier',
+    fontSize: 8,
+  },
+  iapBtn: {
+    borderWidth: 1,
+    borderColor: COLORS.cyan,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+  },
+  iapHalf: {
+    flex: 1,
+  },
+  iapRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  iapBtnText: {
+    color: COLORS.cyan,
+    fontFamily: 'Courier',
+    fontSize: 9,
+    letterSpacing: 0.5,
   },
 });

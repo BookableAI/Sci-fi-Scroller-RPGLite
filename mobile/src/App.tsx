@@ -3,13 +3,15 @@
  * Strict layout: top 38% combat diorama / bottom 62% interactive telemetry.
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { SafeAreaView, ScrollView, StyleSheet, View } from 'react-native';
 
 import { BattlerViewport } from './components/battler/BattlerViewport';
 import { CacheGrid } from './components/cache/CacheGrid';
 import { GearComparisonModal } from './components/cache/GearComparisonModal';
 import { TelemetryPanel } from './components/ui/TelemetryPanel';
+import { AdMobManager } from './services/AdMobManager';
+import { PurchaseManager } from './services/PurchaseManager';
 
 const COLORS = {
   obsidian: '#0B0E14',
@@ -34,6 +36,11 @@ function TelemetryPane(): React.ReactElement {
 }
 
 export default function App(): React.ReactElement {
+  useEffect(() => {
+    AdMobManager.initialize();
+    void PurchaseManager.configure();
+  }, []);
+
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.shell}>

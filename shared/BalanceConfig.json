@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "cacheDropProbabilities": {
+    "1": { "COMMON": 100.0, "UNCOMMON": 0.0, "RARE": 0.0, "EPIC": 0.0, "LEGENDARY": 0.0, "MYTHIC": 0.0, "CELESTIAL": 0.0 },
+    "2": { "COMMON": 92.0, "UNCOMMON": 8.0, "RARE": 0.0, "EPIC": 0.0, "LEGENDARY": 0.0, "MYTHIC": 0.0, "CELESTIAL": 0.0 },
+    "3": { "COMMON": 78.0, "UNCOMMON": 18.0, "RARE": 4.0, "EPIC": 0.0, "LEGENDARY": 0.0, "MYTHIC": 0.0, "CELESTIAL": 0.0 },
+    "4": { "COMMON": 60.0, "UNCOMMON": 27.0, "RARE": 11.0, "EPIC": 2.0, "LEGENDARY": 0.0, "MYTHIC": 0.0, "CELESTIAL": 0.0 },
+    "5": { "COMMON": 42.0, "UNCOMMON": 33.0, "RARE": 18.0, "EPIC": 6.0, "LEGENDARY": 1.0, "MYTHIC": 0.0, "CELESTIAL": 0.0 },
+    "6": { "COMMON": 28.0, "UNCOMMON": 34.0, "RARE": 24.0, "EPIC": 11.0, "LEGENDARY": 3.0, "MYTHIC": 0.0, "CELESTIAL": 0.0 },
+    "7": { "COMMON": 16.0, "UNCOMMON": 30.0, "RARE": 30.0, "EPIC": 17.0, "LEGENDARY": 6.0, "MYTHIC": 1.0, "CELESTIAL": 0.0 },
+    "8": { "COMMON": 8.0, "UNCOMMON": 24.0, "RARE": 33.0, "EPIC": 22.0, "LEGENDARY": 10.0, "MYTHIC": 3.0, "CELESTIAL": 0.0 },
+    "9": { "COMMON": 3.0, "UNCOMMON": 16.0, "RARE": 32.0, "EPIC": 27.0, "LEGENDARY": 15.0, "MYTHIC": 6.0, "CELESTIAL": 1.0 },
+    "10": { "COMMON": 1.0, "UNCOMMON": 10.0, "RARE": 28.0, "EPIC": 30.0, "LEGENDARY": 20.0, "MYTHIC": 9.0, "CELESTIAL": 2.0 },
+    "11": { "COMMON": 0.0, "UNCOMMON": 7.0, "RARE": 22.0, "EPIC": 31.0, "LEGENDARY": 24.0, "MYTHIC": 13.0, "CELESTIAL": 3.0 },
+    "12": { "COMMON": 0.0, "UNCOMMON": 5.0, "RARE": 18.0, "EPIC": 30.0, "LEGENDARY": 26.0, "MYTHIC": 16.0, "CELESTIAL": 5.0 },
+    "13": { "COMMON": 0.0, "UNCOMMON": 3.0, "RARE": 14.0, "EPIC": 28.0, "LEGENDARY": 28.0, "MYTHIC": 20.0, "CELESTIAL": 7.0 },
+    "14": { "COMMON": 0.0, "UNCOMMON": 1.0, "RARE": 10.0, "EPIC": 25.0, "LEGENDARY": 30.0, "MYTHIC": 24.0, "CELESTIAL": 10.0 },
+    "15": { "COMMON": 0.0, "UNCOMMON": 0.0, "RARE": 5.0, "EPIC": 20.0, "LEGENDARY": 32.0, "MYTHIC": 28.0, "CELESTIAL": 15.0 }
+  },
+  "combat": {
+    "supplyCacheDropChance": 0.4,
+    "baseSalvageCredits": 12,
+    "enemyHpBase": 80,
+    "enemyHpPerTier": 28
+  },
+  "monetization": {
+    "interstitialEveryNLevels": 5,
+    "overclockDurationSeconds": 1200,
+    "overclockSpeedMultiplier": 2
+  }
+}

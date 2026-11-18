@@ -229,7 +229,9 @@ export class BattlerEngine {
     }
     const frameDelta = Math.min(0.25, (timestamp - this.lastTimestamp) / 1000);
     this.lastTimestamp = timestamp;
-    this.accumulator += frameDelta;
+    // System Overclock (rewarded): 2x combat progression / movement
+    const speed = useGameStore.getState().getCombatSpeedMultiplier();
+    this.accumulator += frameDelta * speed;
 
     let steps = 0;
     while (this.accumulator >= FIXED_DT && steps < 5) {
