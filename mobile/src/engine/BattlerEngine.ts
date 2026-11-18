@@ -148,14 +148,19 @@ function enemyStats(world: number, level: number): {
   };
 }
 
-function salvageCreditsForKill(world: number, level: number, pr: number): number {
+/** Standard Credits — common kill salvage (funds Cache upgrades). */
+function standardCreditsForKill(world: number, level: number, pr: number): number {
   const tier = (world - 1) * 10 + level;
   return Math.round(12 + tier * 4 + pr * 0.08);
 }
 
-/** ~40% chance a defeated construct drops a Supply Cache */
-function rollSupplyCacheDrop(rng: () => number = Math.random): boolean {
-  return rng() < 0.4;
+/**
+ * Gold Credits — scarcer kill salvage (spend to Open Cache).
+ * Early W1 ≈ 1 GC/kill; open cost 5 → crates every ~5 kills early-game.
+ */
+function goldCreditsForKill(world: number, level: number): number {
+  const tier = (world - 1) * 10 + level;
+  return Math.max(1, Math.round(0.85 + tier * 0.12));
 }
 
 function distanceToHostile(exo: ExoRigState, hostile: HostileConstruct): number {
@@ -563,18 +568,21 @@ export class BattlerEngine {
 
   private resolveKill(hostile: HostileConstruct, powerRating: number): void {
     const store = useGameStore.getState();
-    const credits = salvageCreditsForKill(
+    const standard = standardCreditsForKill(
       store.currentSectorWorld,
       store.currentSectorLevel,
       powerRating,
     );
-    const dropCache = rollSupplyCacheDrop();
-    store.applyCombatVictory(credits, dropCache);
+    const gold = goldCreditsForKill(
+      store.currentSectorWorld,
+      store.currentSectorLevel,
+    );
+    store.applyCombatVictory(standard, gold);
 
     this.spawnDamageNumber(
       hostile.x + hostile.width * 0.5,
       hostile.y - 8,
-      credits,
+      standard,
     );
 
     // Soft heal on sector clear

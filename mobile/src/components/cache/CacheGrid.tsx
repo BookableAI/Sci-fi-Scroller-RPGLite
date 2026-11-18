@@ -1,5 +1,6 @@
 /**
- * Supply Cache buffer grid — 6 slots + upgrade / auto-open telemetry.
+ * Supply Cache bay — single Open Cache (Gold) + upgrade (Standard Credits).
+ * Auto-open / multi-open deferred.
  */
 
 import React, { useEffect, useRef } from 'react';
@@ -11,12 +12,9 @@ import {
 } from 'react-native';
 
 import { getUpgradeRequirements } from '../../engine/ProbabilityMatrix';
-import {
-  getBatchCapacity,
-  useGameStore,
-} from '../../store/useGameStore';
+import { useGameStore } from '../../store/useGameStore';
 import { COLORS, FONTS, RADII } from '../../theme/colors';
-import { CACHE_BUFFER_CAPACITY, type SupplyCache } from '../../types/game';
+import { OPEN_CACHE_GOLD_COST } from '../../types/game';
 
 /** Lazy monetization accessors — keep ads/purchases packages off the CacheGrid module graph. */
 function getAdMobManager(): {
@@ -61,76 +59,19 @@ function formatTimer(seconds: number): string {
   return remM > 0 ? `${h}h ${remM}m` : `${h}h`;
 }
 
-function formatCredits(n: number): string {
+function formatAmount(n: number): string {
   return n.toLocaleString('en-US');
 }
 
-function CacheSlot({
-  cache,
-  index,
-  onDecrypt,
-}: {
-  cache: SupplyCache | undefined;
-  index: number;
-  onDecrypt: (id: string) => void;
-}): React.ReactElement {
-  const occupied = cache !== undefined;
-  const decrypting = cache?.isDecrypting === true;
-  const progressPct = Math.round((cache?.progress ?? 0) * 100);
-
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={
-        occupied
-          ? `Supply Cache slot ${index + 1}`
-          : `Empty Supply Cache slot ${index + 1}`
-      }
-      disabled={!occupied || decrypting}
-      onPress={() => {
-        if (cache && !cache.isDecrypting) {
-          onDecrypt(cache.id);
-        }
-      }}
-      style={[
-        styles.slot,
-        occupied && styles.slotOccupied,
-        decrypting && styles.slotDecrypting,
-      ]}
-    >
-      <Text style={styles.slotIndex}>{`S${index + 1}`}</Text>
-      {!occupied && <Text style={styles.slotEmpty}>EMPTY</Text>}
-      {occupied && !decrypting && (
-        <>
-          <Text style={styles.slotTier}>{`T${cache.tier}`}</Text>
-          <Text style={styles.slotAction}>DECRYPT</Text>
-        </>
-      )}
-      {occupied && decrypting && (
-        <>
-          <Text style={styles.slotProgress}>{`${progressPct}%`}</Text>
-          <View style={styles.miniBarTrack}>
-            <View
-              style={[styles.miniBarFill, { width: `${progressPct}%` as `${number}%` }]}
-            />
-          </View>
-        </>
-      )}
-    </Pressable>
-  );
-}
-
 export function CacheGrid(): React.ReactElement {
-  const cacheBuffer = useGameStore((s) => s.cacheBuffer);
-  const cacheSlots = useGameStore((s) => s.cacheSlots);
   const cacheLevel = useGameStore((s) => s.cacheLevel);
-  const credits = useGameStore((s) => s.credits);
-  const world = useGameStore((s) => s.currentSectorWorld);
+  const standardCredits = useGameStore((s) => s.standardCredits);
+  const goldCredits = useGameStore((s) => s.goldCredits);
   const fabrication = useGameStore((s) => s.cacheFabrication);
   const overclockExpiresAtMs = useGameStore((s) => s.overclockExpiresAtMs);
-  const decryptCache = useGameStore((s) => s.decryptCache);
+  const openCache = useGameStore((s) => s.openCache);
   const upgradeCacheLevel = useGameStore((s) => s.upgradeCacheLevel);
-  const tickDecryption = useGameStore((s) => s.tickDecryption);
+  const tickFabrication = useGameStore((s) => s.tickFabrication);
 
   const lastTickRef = useRef<number>(Date.now());
   const overclockActive =
@@ -146,52 +87,60 @@ export function CacheGrid(): React.ReactElement {
       const now = Date.now();
       const delta = (now - lastTickRef.current) / 1000;
       lastTickRef.current = now;
-      tickDecryption(delta);
+      tickFabrication(delta);
     }, 250);
     return () => clearInterval(id);
-  }, [tickDecryption]);
-
-  const slotCount = Math.min(CACHE_BUFFER_CAPACITY, cacheSlots);
-  const slots: Array<SupplyCache | undefined> = Array.from(
-    { length: slotCount },
-    (_, i) => cacheBuffer[i],
-  );
+  }, [tickFabrication]);
 
   const upgradeReqs =
     cacheLevel >= 15
       ? null
       : getUpgradeRequirements(cacheLevel);
-  const canAfford =
-    upgradeReqs !== null && credits >= upgradeReqs.costCredits && fabrication === null;
-  const batchCapacity = world >= 2 ? Math.max(1, world - 1) : getBatchCapacity(world);
+  const canAffordUpgrade =
+    upgradeReqs !== null &&
+    standardCredits >= upgradeReqs.costCredits &&
+    fabrication === null;
+  const canOpenCache = goldCredits >= OPEN_CACHE_GOLD_COST;
   const fabricationPct = Math.round((fabrication?.progress ?? 0) * 100);
 
   return (
     <View style={styles.root}>
       <View style={styles.headerRow}>
-        <Text style={styles.title}>SUPPLY CACHE ARRAY</Text>
-        <Text style={styles.credits}>{`SC ${formatCredits(credits)}`}</Text>
-      </View>
-
-      <View style={styles.slotRow}>
-        {slots.map((cache, index) => (
-          <CacheSlot
-            key={cache?.id ?? `empty-${index}`}
-            cache={cache}
-            index={index}
-            onDecrypt={decryptCache}
-          />
-        ))}
-      </View>
-
-      {world >= 2 && (
-        <View style={styles.autoOpen}>
-          <Text style={styles.autoOpenLabel}>AUTO-OPEN PROTOCOL: ACTIVE</Text>
-          <Text style={styles.autoOpenMeta}>
-            {`BATCH CAPACITY ${batchCapacity}  ·  WORLD ${world}`}
+        <Text style={styles.title}>SUPPLY CACHE BAY</Text>
+        <View style={styles.currencyCol}>
+          <Text style={styles.standardCredits}>
+            {`STC ${formatAmount(standardCredits)}`}
+          </Text>
+          <Text style={styles.goldCredits}>
+            {`GC ${formatAmount(goldCredits)}`}
           </Text>
         </View>
-      )}
+      </View>
+
+      <Text style={styles.subtitle}>
+        STANDARD CREDITS FUND UPGRADES · GOLD OPENS CACHES
+      </Text>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Open Supply Cache"
+        disabled={!canOpenCache}
+        onPress={() => {
+          openCache();
+        }}
+        style={[styles.openBtn, !canOpenCache && styles.openBtnDisabled]}
+      >
+        <Text
+          style={[styles.openBtnText, !canOpenCache && styles.disabledText]}
+        >
+          OPEN CACHE
+        </Text>
+        <Text
+          style={[styles.openBtnCost, !canOpenCache && styles.disabledText]}
+        >
+          {`${OPEN_CACHE_GOLD_COST} GOLD CREDITS  ·  TIER ${cacheLevel}`}
+        </Text>
+      </Pressable>
 
       <View style={styles.upgradePanel}>
         <View style={styles.upgradeHeader}>
@@ -222,16 +171,16 @@ export function CacheGrid(): React.ReactElement {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Upgrade Cache Level"
-            disabled={!canAfford}
+            disabled={!canAffordUpgrade}
             onPress={() => {
               upgradeCacheLevel();
             }}
-            style={[styles.upgradeBtn, !canAfford && styles.upgradeBtnDisabled]}
+            style={[styles.upgradeBtn, !canAffordUpgrade && styles.upgradeBtnDisabled]}
           >
             <Text
               style={[
                 styles.upgradeBtnText,
-                !canAfford && styles.upgradeBtnTextDisabled,
+                !canAffordUpgrade && styles.disabledText,
               ]}
             >
               UPGRADE CACHE LEVEL
@@ -240,7 +189,7 @@ export function CacheGrid(): React.ReactElement {
               <Text
                 style={[
                   styles.upgradeCost,
-                  !canAfford && styles.upgradeBtnTextDisabled,
+                  !canAffordUpgrade && styles.disabledText,
                 ]}
               >
                 {fabrication
@@ -249,7 +198,7 @@ export function CacheGrid(): React.ReactElement {
                         fabrication.durationSeconds * (1 - fabrication.progress),
                       ),
                     )} REMAINING`
-                  : `${formatCredits(upgradeReqs.costCredits)} SC  ·  ${formatTimer(
+                  : `${formatAmount(upgradeReqs.costCredits)} STC  ·  ${formatTimer(
                       upgradeReqs.timerSeconds,
                     )}`}
               </Text>
@@ -286,7 +235,7 @@ export function CacheGrid(): React.ReactElement {
           <Text
             style={[
               styles.rewardBtnText,
-              overclockActive && styles.upgradeBtnTextDisabled,
+              overclockActive && styles.disabledText,
             ]}
           >
             {overclockActive
@@ -296,7 +245,7 @@ export function CacheGrid(): React.ReactElement {
           <Text
             style={[
               styles.rewardBtnMeta,
-              overclockActive && styles.upgradeBtnTextDisabled,
+              overclockActive && styles.disabledText,
             ]}
           >
             REWARDED VIDEO
@@ -351,8 +300,8 @@ const styles = StyleSheet.create({
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
+    alignItems: 'flex-start',
+    marginBottom: 6,
   },
   title: {
     color: COLORS.cyan,
@@ -360,94 +309,53 @@ const styles = StyleSheet.create({
     fontSize: 11,
     letterSpacing: 1.1,
   },
-  credits: {
-    color: COLORS.amber,
-    fontFamily: FONTS.mono,
-    fontSize: 11,
+  currencyCol: {
+    alignItems: 'flex-end',
+    gap: 2,
   },
-  slotRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 6,
-  },
-  slot: {
-    flex: 1,
-    aspectRatio: 1,
-    maxHeight: 72,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.void,
-    borderRadius: RADII.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 4,
-  },
-  slotOccupied: {
-    borderColor: COLORS.cyan,
-  },
-  slotDecrypting: {
-    borderColor: COLORS.amber,
-  },
-  slotIndex: {
-    position: 'absolute',
-    top: 3,
-    left: 4,
-    color: COLORS.muted,
-    fontFamily: FONTS.mono,
-    fontSize: 8,
-  },
-  slotEmpty: {
-    color: COLORS.muted,
-    fontFamily: FONTS.mono,
-    fontSize: 8,
-  },
-  slotTier: {
-    color: COLORS.text,
-    fontFamily: FONTS.mono,
-    fontSize: 12,
-  },
-  slotAction: {
-    marginTop: 2,
+  standardCredits: {
     color: COLORS.cyan,
     fontFamily: FONTS.mono,
-    fontSize: 7,
+    fontSize: 11,
   },
-  slotProgress: {
+  goldCredits: {
     color: COLORS.amber,
     fontFamily: FONTS.mono,
     fontSize: 11,
   },
-  miniBarTrack: {
-    marginTop: 4,
-    width: '80%',
-    height: 3,
-    backgroundColor: COLORS.border,
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  miniBarFill: {
-    height: 3,
-    backgroundColor: COLORS.amber,
-  },
-  autoOpen: {
-    marginTop: 10,
-    borderWidth: 1,
-    borderColor: COLORS.teal,
-    borderRadius: RADII.sm,
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-  },
-  autoOpenLabel: {
-    color: COLORS.teal,
+  subtitle: {
+    color: COLORS.muted,
     fontFamily: FONTS.mono,
-    fontSize: 10,
-    letterSpacing: 0.8,
+    fontSize: 8,
+    letterSpacing: 0.4,
+    marginBottom: 10,
   },
-  autoOpenMeta: {
-    marginTop: 2,
+  openBtn: {
+    borderWidth: 1,
+    borderColor: COLORS.amber,
+    borderRadius: RADII.sm,
+    backgroundColor: COLORS.void,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+  },
+  openBtnDisabled: {
+    borderColor: COLORS.border,
+  },
+  openBtnText: {
+    color: COLORS.amber,
+    fontFamily: FONTS.mono,
+    fontSize: 13,
+    letterSpacing: 1.2,
+  },
+  openBtnCost: {
+    marginTop: 4,
     color: COLORS.muted,
     fontFamily: FONTS.mono,
     fontSize: 9,
+  },
+  disabledText: {
+    color: COLORS.muted,
   },
   upgradePanel: {
     marginTop: 10,
@@ -498,12 +406,9 @@ const styles = StyleSheet.create({
     fontSize: 11,
     letterSpacing: 0.8,
   },
-  upgradeBtnTextDisabled: {
-    color: COLORS.muted,
-  },
   upgradeCost: {
     marginTop: 3,
-    color: COLORS.amber,
+    color: COLORS.teal,
     fontFamily: FONTS.mono,
     fontSize: 9,
   },
