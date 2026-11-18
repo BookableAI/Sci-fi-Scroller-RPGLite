@@ -88,6 +88,25 @@ export interface CacheFabricationJob {
   progress: number;
 }
 
+/** Player-selectable combat targeting priority */
+export const TARGETING_PROTOCOLS = [
+  'CLOSEST',
+  'STRONGEST',
+  'FURTHEST',
+  'WEAKEST',
+] as const;
+
+export type TargetingProtocol = (typeof TARGETING_PROTOCOLS)[number];
+
+export const TARGETING_PROTOCOL_LABELS: Readonly<
+  Record<TargetingProtocol, string>
+> = {
+  CLOSEST: 'CLOSEST FIRST',
+  STRONGEST: 'STRONGEST FIRST',
+  FURTHEST: 'FURTHEST FIRST',
+  WEAKEST: 'WEAKEST FIRST',
+};
+
 export type PersistedGameSnapshot = {
   inventory: Inventory;
   equippedGear: EquippedGear;
@@ -111,6 +130,8 @@ export type PersistedGameSnapshot = {
   comparisonQueue: GearItem[];
   /** Epoch ms when System Overclock (2x) expires; null when inactive */
   overclockExpiresAtMs: number | null;
+  /** Combat aim priority protocol (persisted) */
+  targetingProtocol: TargetingProtocol;
 };
 
 /** Derived loadout telemetry shown in TelemetryPanel */

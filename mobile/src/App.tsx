@@ -13,11 +13,7 @@ import { BattlerViewport } from './components/battler/BattlerViewport';
 import { CacheGrid } from './components/cache/CacheGrid';
 import { GearComparisonModal } from './components/cache/GearComparisonModal';
 import { TelemetryPanel } from './components/ui/TelemetryPanel';
-
-const COLORS = {
-  obsidian: '#0B0E14',
-  border: '#1E293B',
-} as const;
+import { COLORS } from './theme/colors';
 
 function TelemetryPane(): React.ReactElement {
   return (
@@ -74,7 +70,7 @@ export default function App(): React.ReactElement {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: COLORS.obsidian,
+    backgroundColor: COLORS.void,
   },
   shell: {
     flex: 1,
@@ -89,11 +85,11 @@ const styles = StyleSheet.create({
     flex: 62,
     minHeight: 0,
     borderTopWidth: 1,
-    borderTopColor: COLORS.border,
+    borderTopColor: COLORS.borderGlow,
   },
   bottomRoot: {
     flex: 1,
-    backgroundColor: COLORS.obsidian,
+    backgroundColor: COLORS.void,
     minHeight: 0,
   },
   bottomScroll: {

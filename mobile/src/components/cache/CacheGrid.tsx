@@ -1,5 +1,5 @@
 /**
- * Supply Cache buffer grid — 6 industrial slots + upgrade / auto-open telemetry.
+ * Supply Cache buffer grid — 6 slots + upgrade / auto-open telemetry.
  */
 
 import React, { useEffect, useRef } from 'react';
@@ -15,6 +15,7 @@ import {
   getBatchCapacity,
   useGameStore,
 } from '../../store/useGameStore';
+import { COLORS, FONTS, RADII } from '../../theme/colors';
 import { CACHE_BUFFER_CAPACITY, type SupplyCache } from '../../types/game';
 
 /** Lazy monetization accessors — keep ads/purchases packages off the CacheGrid module graph. */
@@ -46,16 +47,6 @@ function getPurchaseManager(): {
     return null;
   }
 }
-
-const COLORS = {
-  obsidian: '#0B0E14',
-  panel: '#121721',
-  border: '#1E293B',
-  text: '#F8FAFC',
-  muted: '#64748B',
-  cyan: '#38BDF8',
-  amber: '#F59E0B',
-} as const;
 
 function formatTimer(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
@@ -178,7 +169,7 @@ export function CacheGrid(): React.ReactElement {
   return (
     <View style={styles.root}>
       <View style={styles.headerRow}>
-        <Text style={styles.title}>SUPPLY CACHE BUFFER</Text>
+        <Text style={styles.title}>SUPPLY CACHE ARRAY</Text>
         <Text style={styles.credits}>{`SC ${formatCredits(credits)}`}</Text>
       </View>
 
@@ -354,6 +345,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.panel,
     borderWidth: 1,
     borderColor: COLORS.border,
+    borderRadius: RADII.md,
     padding: 10,
   },
   headerRow: {
@@ -364,13 +356,13 @@ const styles = StyleSheet.create({
   },
   title: {
     color: COLORS.cyan,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 11,
     letterSpacing: 1.1,
   },
   credits: {
     color: COLORS.amber,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 11,
   },
   slotRow: {
@@ -384,7 +376,8 @@ const styles = StyleSheet.create({
     maxHeight: 72,
     borderWidth: 1,
     borderColor: COLORS.border,
-    backgroundColor: COLORS.obsidian,
+    backgroundColor: COLORS.void,
+    borderRadius: RADII.sm,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 4,
@@ -400,28 +393,28 @@ const styles = StyleSheet.create({
     top: 3,
     left: 4,
     color: COLORS.muted,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 8,
   },
   slotEmpty: {
     color: COLORS.muted,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 8,
   },
   slotTier: {
     color: COLORS.text,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 12,
   },
   slotAction: {
     marginTop: 2,
     color: COLORS.cyan,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 7,
   },
   slotProgress: {
     color: COLORS.amber,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 11,
   },
   miniBarTrack: {
@@ -429,6 +422,8 @@ const styles = StyleSheet.create({
     width: '80%',
     height: 3,
     backgroundColor: COLORS.border,
+    borderRadius: 2,
+    overflow: 'hidden',
   },
   miniBarFill: {
     height: 3,
@@ -437,20 +432,21 @@ const styles = StyleSheet.create({
   autoOpen: {
     marginTop: 10,
     borderWidth: 1,
-    borderColor: COLORS.cyan,
+    borderColor: COLORS.teal,
+    borderRadius: RADII.sm,
     paddingVertical: 6,
     paddingHorizontal: 8,
   },
   autoOpenLabel: {
-    color: COLORS.cyan,
-    fontFamily: 'Courier',
+    color: COLORS.teal,
+    fontFamily: FONTS.mono,
     fontSize: 10,
     letterSpacing: 0.8,
   },
   autoOpenMeta: {
     marginTop: 2,
     color: COLORS.muted,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 9,
   },
   upgradePanel: {
@@ -464,19 +460,21 @@ const styles = StyleSheet.create({
   },
   upgradeLevel: {
     color: COLORS.text,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 11,
     letterSpacing: 0.6,
   },
   fabLabel: {
     marginTop: 2,
     color: COLORS.amber,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 9,
   },
   fabTrack: {
     height: 4,
     backgroundColor: COLORS.border,
+    borderRadius: 2,
+    overflow: 'hidden',
     marginBottom: 8,
   },
   fabFill: {
@@ -486,6 +484,7 @@ const styles = StyleSheet.create({
   upgradeBtn: {
     borderWidth: 1,
     borderColor: COLORS.cyan,
+    borderRadius: RADII.sm,
     paddingVertical: 8,
     paddingHorizontal: 10,
     alignItems: 'center',
@@ -495,7 +494,7 @@ const styles = StyleSheet.create({
   },
   upgradeBtnText: {
     color: COLORS.cyan,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 11,
     letterSpacing: 0.8,
   },
@@ -505,12 +504,12 @@ const styles = StyleSheet.create({
   upgradeCost: {
     marginTop: 3,
     color: COLORS.amber,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 9,
   },
   maxed: {
     color: COLORS.muted,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 10,
     textAlign: 'center',
     paddingVertical: 8,
@@ -524,7 +523,7 @@ const styles = StyleSheet.create({
   },
   monetizationTitle: {
     color: COLORS.muted,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 10,
     letterSpacing: 1,
     marginBottom: 2,
@@ -532,6 +531,7 @@ const styles = StyleSheet.create({
   rewardBtn: {
     borderWidth: 1,
     borderColor: COLORS.amber,
+    borderRadius: RADII.sm,
     paddingVertical: 8,
     paddingHorizontal: 10,
     alignItems: 'center',
@@ -539,19 +539,20 @@ const styles = StyleSheet.create({
   },
   rewardBtnText: {
     color: COLORS.amber,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 10,
     letterSpacing: 0.6,
   },
   rewardBtnMeta: {
     marginTop: 2,
     color: COLORS.muted,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 8,
   },
   iapBtn: {
     borderWidth: 1,
-    borderColor: COLORS.cyan,
+    borderColor: COLORS.violet,
+    borderRadius: RADII.sm,
     paddingVertical: 8,
     paddingHorizontal: 8,
     alignItems: 'center',
@@ -564,8 +565,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   iapBtnText: {
-    color: COLORS.cyan,
-    fontFamily: 'Courier',
+    color: COLORS.violet,
+    fontFamily: FONTS.mono,
     fontSize: 9,
     letterSpacing: 0.5,
   },

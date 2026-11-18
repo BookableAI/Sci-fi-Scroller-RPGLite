@@ -18,19 +18,8 @@ import {
   type HostileConstruct,
   type Projectile,
 } from '../../engine/BattlerEngine';
-
-const COLORS = {
-  obsidian: '#0B0E14',
-  grid: '#1E293B',
-  panel: '#121721',
-  cyan: '#38BDF8',
-  amber: '#F59E0B',
-  text: '#F8FAFC',
-  muted: '#64748B',
-  hull: '#94A3B8',
-  hostile: '#F87171',
-  projectile: '#7DD3FC',
-} as const;
+import { COLORS, FONTS, RADII } from '../../theme/colors';
+import { TARGETING_PROTOCOL_LABELS } from '../../types/game';
 
 function useBattlerSnapshot(): BattlerSnapshot {
   const [snapshot, setSnapshot] = useState<BattlerSnapshot>(() =>
@@ -53,8 +42,8 @@ function GridOverlay({ width, height }: { width: number; height: number }) {
   const lines = useMemo(() => {
     const vertical: number[] = [];
     const horizontal: number[] = [];
-    for (let x = 0; x < width; x += 24) vertical.push(x);
-    for (let y = 0; y < height; y += 24) horizontal.push(y);
+    for (let x = 0; x < width; x += 28) vertical.push(x);
+    for (let y = 0; y < height; y += 28) horizontal.push(y);
     return { vertical, horizontal };
   }, [width, height]);
 
@@ -101,9 +90,13 @@ function ParallaxBands({
                 height: bandHeight,
                 width: width * 2,
                 left: shift,
-                opacity: 0.35 + index * 0.15,
+                opacity: 0.3 + index * 0.14,
                 borderColor:
-                  index === 2 ? COLORS.cyan : COLORS.grid,
+                  index === 2
+                    ? COLORS.teal
+                    : index === 1
+                      ? COLORS.violet
+                      : COLORS.borderGlow,
               },
             ]}
           />
@@ -132,7 +125,7 @@ function ExoRigView({ snapshot }: { snapshot: BattlerSnapshot }) {
         style={[
           styles.shieldRing,
           {
-            opacity: 0.25 + exoRig.shieldFraction * 0.55,
+            opacity: 0.28 + exoRig.shieldFraction * 0.55,
             borderColor: COLORS.cyan,
           },
         ]}
@@ -152,7 +145,13 @@ function ExoRigView({ snapshot }: { snapshot: BattlerSnapshot }) {
   );
 }
 
-function HostileView({ hostile }: { hostile: HostileConstruct }) {
+function HostileView({
+  hostile,
+  isAimTarget,
+}: {
+  hostile: HostileConstruct;
+  isAimTarget: boolean;
+}): React.ReactElement {
   const pct = Math.max(0, (hostile.hp / hostile.maxHp) * 100);
   return (
     <View
@@ -164,6 +163,7 @@ function HostileView({ hostile }: { hostile: HostileConstruct }) {
           width: hostile.width,
           height: hostile.height,
         },
+        isAimTarget && styles.hostileAimed,
       ]}
     >
       <View style={styles.hostileBody} />
@@ -184,7 +184,7 @@ function ProjectileView({ shot }: { shot: Projectile }) {
     <View
       style={[
         styles.projectile,
-        { left: shot.x, top: shot.y },
+        { left: shot.x, top: shot.y - 1 },
       ]}
     />
   );
@@ -223,7 +223,7 @@ function TelemetryOverlay({ snapshot }: { snapshot: BattlerSnapshot }) {
         </Text>
       </View>
       <Text style={styles.prReadout}>
-        {`PR ${telemetry.totalPowerRating}`}
+        {`PR ${telemetry.totalPowerRating}  ·  ${TARGETING_PROTOCOL_LABELS[telemetry.targetingProtocol]}`}
       </Text>
     </View>
   );
@@ -252,7 +252,11 @@ export function BattlerViewport(): React.ReactElement {
       />
       <ExoRigView snapshot={snapshot} />
       {snapshot.hostiles.map((h) => (
-        <HostileView key={h.id} hostile={h} />
+        <HostileView
+          key={h.id}
+          hostile={h}
+          isAimTarget={snapshot.aimTargetId === h.id}
+        />
       ))}
       {snapshot.projectiles.map((p) => (
         <ProjectileView key={p.id} shot={p} />
@@ -269,27 +273,29 @@ export function BattlerViewport(): React.ReactElement {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: COLORS.obsidian,
+    backgroundColor: COLORS.void,
     overflow: 'hidden',
+    borderRadius: RADII.sm,
   },
   frameBorder: {
     ...StyleSheet.absoluteFill,
     borderWidth: 1,
-    borderColor: COLORS.grid,
+    borderColor: COLORS.borderGlow,
+    borderRadius: RADII.sm,
   },
   gridV: {
     position: 'absolute',
     top: 0,
     width: 1,
-    backgroundColor: COLORS.grid,
-    opacity: 0.45,
+    backgroundColor: COLORS.border,
+    opacity: 0.35,
   },
   gridH: {
     position: 'absolute',
     left: 0,
     height: 1,
-    backgroundColor: COLORS.grid,
-    opacity: 0.45,
+    backgroundColor: COLORS.border,
+    opacity: 0.35,
   },
   parallaxRow: {
     position: 'absolute',
@@ -307,42 +313,56 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.hull,
     borderWidth: 1,
     borderColor: COLORS.cyan,
+    borderRadius: RADII.sm,
   },
   shieldRing: {
     ...StyleSheet.absoluteFill,
     borderWidth: 1,
-    borderRadius: 2,
+    borderRadius: RADII.sm,
   },
   hostile: {
     position: 'absolute',
     alignItems: 'center',
   },
+  hostileAimed: {
+    shadowColor: COLORS.teal,
+    shadowOpacity: 0.55,
+    shadowRadius: 6,
+    elevation: 3,
+  },
   hostileBody: {
     width: '100%',
     height: '85%',
-    backgroundColor: COLORS.panel,
+    backgroundColor: COLORS.panelElevated,
     borderWidth: 1,
     borderColor: COLORS.hostile,
+    borderRadius: RADII.sm,
   },
   hpTrack: {
     marginTop: 3,
     width: '100%',
     height: 3,
-    backgroundColor: COLORS.grid,
+    backgroundColor: COLORS.border,
+    borderRadius: 2,
+    overflow: 'hidden',
   },
   hpFill: {
     height: '100%',
   },
   projectile: {
     position: 'absolute',
-    width: 10,
-    height: 2,
+    width: 12,
+    height: 3,
     backgroundColor: COLORS.projectile,
+    borderRadius: 2,
+    shadowColor: COLORS.cyan,
+    shadowOpacity: 0.7,
+    shadowRadius: 4,
   },
   damageNumber: {
     position: 'absolute',
     color: COLORS.amber,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 11,
     fontWeight: '700',
   },
@@ -354,7 +374,7 @@ const styles = StyleSheet.create({
   },
   sectorReadout: {
     color: COLORS.cyan,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 13,
     letterSpacing: 1,
   },
@@ -365,13 +385,13 @@ const styles = StyleSheet.create({
   },
   telemetryText: {
     color: COLORS.text,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 10,
   },
   prReadout: {
     marginTop: 2,
     color: COLORS.muted,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 10,
   },
 });
