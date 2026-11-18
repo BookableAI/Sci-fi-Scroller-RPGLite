@@ -1,10 +1,11 @@
 /**
  * Sector Sentinel — fixed-timestep combat engine (outside React render).
  * Exo-Rig vs Autonomous Hostile Constructs; rewards wire into Zustand store.
+ * Luminous combat VFX: hit-flash, crit micro-shake, rarity trails, credit arcs.
  */
 
 import { useGameStore } from '../store/useGameStore';
-import type { TargetingProtocol } from '../types/game';
+import type { Rarity, TargetingProtocol } from '../types/game';
 
 export const TARGET_FPS = 60;
 export const FIXED_DT = 1 / TARGET_FPS;
@@ -14,6 +15,39 @@ const PROJECTILE_HIT_W = 14;
 const PROJECTILE_HIT_H = 10;
 /** Soft aim pad so bolts still connect when Y drifts slightly */
 const HIT_PAD = 6;
+/** Trail breadcrumb count per bolt */
+const TRAIL_LENGTH = 6;
+/** Hit-flash duration (seconds) */
+const HIT_FLASH_LIFE = 0.09;
+/** Disintegrate dissolve after lethal hit (seconds) */
+const DISINTEGRATE_LIFE = 0.42;
+/** Crit chance floor / weapon-scaled bonus */
+const CRIT_BASE = 0.12;
+const CRIT_PER_WEAPON_STAT = 0.0015;
+const CRIT_DAMAGE_MULT = 1.75;
+/** Camera micro-shake peak amplitude (px) + decay */
+const SHAKE_PEAK = 3.2;
+const SHAKE_DECAY = 9.5;
+
+/** Trail band derived from equipped primary weapon rarity */
+export type TrailBand = 'CYAN' | 'VIOLET' | 'CELESTIAL';
+
+export type CreditKind = 'STANDARD' | 'GOLD';
+
+export function trailBandForRarity(rarity: Rarity | null | undefined): TrailBand {
+  if (rarity === 'RARE' || rarity === 'EPIC') {
+    return 'VIOLET';
+  }
+  if (
+    rarity === 'LEGENDARY' ||
+    rarity === 'MYTHIC' ||
+    rarity === 'CELESTIAL'
+  ) {
+    return 'CELESTIAL';
+  }
+  // COMMON / UNCOMMON / bare exo-rig baseline
+  return 'CYAN';
+}
 
 export interface Vec2 {
   x: number;
@@ -46,6 +80,10 @@ export interface HostileConstruct {
   powerRating: number;
   /** Sector Warden gate boss (every 5th sector level) */
   isBoss: boolean;
+  /** Remaining hit-flash seconds (luminous impact frame) */
+  hitFlash: number;
+  /** Remaining disintegrate seconds; 0 when intact */
+  disintegrate: number;
 }
 
 export interface Projectile {
@@ -59,6 +97,10 @@ export interface Projectile {
   life: number;
   /** Locked aim target id; homing while alive */
   targetId: number | null;
+  /** Equipped-weapon rarity trail band */
+  trailBand: TrailBand;
+  /** Recent positions for luminous trail render */
+  trail: readonly Vec2[];
 }
 
 export interface DamageNumber {
@@ -66,6 +108,20 @@ export interface DamageNumber {
   x: number;
   y: number;
   value: number;
+  life: number;
+  maxLife: number;
+  isCrit: boolean;
+}
+
+/** Floating Standard / Gold Credit pickup after disintegrate */
+export interface CreditPickup {
+  id: number;
+  kind: CreditKind;
+  amount: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
   life: number;
   maxLife: number;
 }
@@ -90,11 +146,15 @@ export interface BattlerSnapshot {
   hostiles: readonly HostileConstruct[];
   projectiles: readonly Projectile[];
   damageNumbers: readonly DamageNumber[];
+  creditPickups: readonly CreditPickup[];
   parallax: readonly ParallaxLayer[];
   telemetry: CombatTelemetry;
   scrollX: number;
   running: boolean;
   aimTargetId: number | null;
+  /** Camera micro-shake offset (crit impacts) */
+  cameraShakeX: number;
+  cameraShakeY: number;
 }
 
 export type BattlerListener = (snapshot: BattlerSnapshot) => void;
@@ -267,6 +327,7 @@ export class BattlerEngine {
   private hostiles: HostileConstruct[] = [];
   private projectiles: Projectile[] = [];
   private damageNumbers: DamageNumber[] = [];
+  private creditPickups: CreditPickup[] = [];
   private parallax: ParallaxLayer[] = [
     { offset: 0, speed: 12 },
     { offset: 0, speed: 28 },
@@ -275,6 +336,8 @@ export class BattlerEngine {
 
   private viewportWidth = 390;
   private viewportHeight = 280;
+  private shakeAmp = 0;
+  private shakePhase = 0;
 
   setViewportSize(width: number, height: number): void {
     this.viewportWidth = Math.max(1, width);
@@ -302,16 +365,25 @@ export class BattlerEngine {
   getSnapshot(): BattlerSnapshot {
     const store = useGameStore.getState();
     const protocol = store.targetingProtocol;
-    const target = selectAimTarget(this.hostiles, this.exoRig, protocol);
+    const living = this.hostiles.filter(
+      (h) => h.disintegrate <= 0 && h.hp > 0,
+    );
+    const target = selectAimTarget(living, this.exoRig, protocol);
     const targetDistance = target
       ? Math.max(0, target.x - (this.exoRig.x + this.exoRig.width))
       : 0;
 
+    const shake = this.sampleShake();
+
     return {
       exoRig: { ...this.exoRig },
       hostiles: this.hostiles.map((h) => ({ ...h })),
-      projectiles: this.projectiles.map((p) => ({ ...p })),
+      projectiles: this.projectiles.map((p) => ({
+        ...p,
+        trail: p.trail.map((t) => ({ ...t })),
+      })),
       damageNumbers: this.damageNumbers.map((d) => ({ ...d })),
+      creditPickups: this.creditPickups.map((c) => ({ ...c })),
       parallax: this.parallax.map((p) => ({ ...p })),
       telemetry: {
         sectorWorld: store.currentSectorWorld,
@@ -325,7 +397,32 @@ export class BattlerEngine {
       scrollX: this.scrollX,
       running: this.running,
       aimTargetId: target?.id ?? null,
+      cameraShakeX: shake.x,
+      cameraShakeY: shake.y,
     };
+  }
+
+  private sampleShake(): Vec2 {
+    if (this.shakeAmp <= 0.05) {
+      return { x: 0, y: 0 };
+    }
+    return {
+      x: Math.sin(this.shakePhase * 47.3) * this.shakeAmp,
+      y: Math.cos(this.shakePhase * 39.1) * this.shakeAmp * 0.7,
+    };
+  }
+
+  private triggerCritShake(): void {
+    this.shakeAmp = Math.max(this.shakeAmp, SHAKE_PEAK);
+  }
+
+  private updateShake(dt: number): void {
+    if (this.shakeAmp <= 0) {
+      this.shakeAmp = 0;
+      return;
+    }
+    this.shakePhase += dt;
+    this.shakeAmp = Math.max(0, this.shakeAmp - SHAKE_DECAY * dt);
   }
 
   start(): void {
@@ -401,6 +498,8 @@ export class BattlerEngine {
     this.updatePlayerFire(dt, powerRating);
     this.updateProjectiles(dt, powerRating);
     this.updateDamageNumbers(dt);
+    this.updateCreditPickups(dt);
+    this.updateShake(dt);
     this.updateDpsMeter(dt);
 
     if (this.hostiles.length === 0) {
@@ -453,6 +552,8 @@ export class BattlerEngine {
       speed,
       powerRating,
       isBoss,
+      hitFlash: 0,
+      disintegrate: 0,
     });
   }
 
@@ -472,13 +573,30 @@ export class BattlerEngine {
     this.exoRig.shieldFraction = 1;
     this.hostiles = [];
     this.projectiles = [];
+    this.creditPickups = [];
+    this.shakeAmp = 0;
     this.fireCooldown = 0.4;
     this.spawnHostile();
   }
 
   private updateHostiles(dt: number): void {
     const engageX = this.exoRig.x + this.exoRig.width + 90;
+    const surviving: HostileConstruct[] = [];
+
     for (const hostile of this.hostiles) {
+      if (hostile.hitFlash > 0) {
+        hostile.hitFlash = Math.max(0, hostile.hitFlash - dt);
+      }
+
+      // Dissolving silhouettes no longer advance or pressure the exo-rig
+      if (hostile.disintegrate > 0) {
+        hostile.disintegrate = Math.max(0, hostile.disintegrate - dt);
+        if (hostile.disintegrate > 0) {
+          surviving.push(hostile);
+        }
+        continue;
+      }
+
       if (hostile.x > engageX) {
         hostile.x -= hostile.speed * dt;
       } else {
@@ -493,13 +611,18 @@ export class BattlerEngine {
           this.exoRig.hp = Math.max(0, this.exoRig.hp - pressure * 0.6);
         }
       }
+      surviving.push(hostile);
     }
+
+    this.hostiles = surviving;
   }
 
   private updatePlayerFire(dt: number, powerRating: number): void {
     this.fireCooldown -= dt;
-    const protocol = useGameStore.getState().targetingProtocol;
-    const target = selectAimTarget(this.hostiles, this.exoRig, protocol);
+    const store = useGameStore.getState();
+    const protocol = store.targetingProtocol;
+    const living = this.hostiles.filter((h) => h.disintegrate <= 0 && h.hp > 0);
+    const target = selectAimTarget(living, this.exoRig, protocol);
     if (!target || this.fireCooldown > 0) {
       return;
     }
@@ -521,6 +644,8 @@ export class BattlerEngine {
     const dy = aimY - originY;
     const dist = Math.max(1, Math.hypot(dx, dy));
     const speed = 320 + powerRating * 0.15;
+    const weapon = store.equippedGear.WEAPON;
+    const trailBand = trailBandForRarity(weapon?.rarity);
 
     this.projectiles.push({
       id: nextEntityId(),
@@ -532,16 +657,25 @@ export class BattlerEngine {
       fromPlayer: true,
       life: 2.5,
       targetId: target.id,
+      trailBand,
+      trail: [{ x: originX, y: originY }],
     });
   }
 
   private updateProjectiles(dt: number, powerRating: number): void {
     const remaining: Projectile[] = [];
     const boltSpeed = 320 + powerRating * 0.15;
+    const weapon = useGameStore.getState().equippedGear.WEAPON;
+    const critChance = Math.min(
+      0.42,
+      CRIT_BASE + (weapon?.primaryStat ?? 0) * CRIT_PER_WEAPON_STAT,
+    );
 
     for (const shot of this.projectiles) {
       if (shot.fromPlayer && shot.targetId !== null) {
-        const locked = this.hostiles.find((h) => h.id === shot.targetId);
+        const locked = this.hostiles.find(
+          (h) => h.id === shot.targetId && h.disintegrate <= 0 && h.hp > 0,
+        );
         if (locked) {
           // Homing correction so bolts stay on the selected protocol target
           const aimX = locked.x + locked.width * 0.35;
@@ -560,6 +694,14 @@ export class BattlerEngine {
       shot.x += shot.vx * dt;
       shot.y += shot.vy * dt;
       shot.life -= dt;
+
+      // Breadcrumb trail (mutable internal array)
+      const trail = shot.trail as Vec2[];
+      trail.push({ x: shot.x, y: shot.y });
+      while (trail.length > TRAIL_LENGTH) {
+        trail.shift();
+      }
+
       if (shot.life <= 0 || shot.x > this.viewportWidth + 80 || shot.x < -40) {
         continue;
       }
@@ -574,11 +716,22 @@ export class BattlerEngine {
               1,
               shot.damage - hostile.defense * COMBAT_BALANCE.defenseMitigation,
             );
-            hostile.hp -= mitigated;
-            this.dpsWindowDamage += mitigated;
-            this.spawnDamageNumber(hostile.x, hostile.y, mitigated);
+            const isCrit = Math.random() < critChance;
+            const dealt = isCrit ? mitigated * CRIT_DAMAGE_MULT : mitigated;
+            hostile.hp -= dealt;
+            hostile.hitFlash = HIT_FLASH_LIFE;
+            this.dpsWindowDamage += dealt;
+            this.spawnDamageNumber(
+              hostile.x + hostile.width * 0.25,
+              hostile.y,
+              dealt,
+              isCrit,
+            );
+            if (isCrit) {
+              this.triggerCritShake();
+            }
             consumed = true;
-            if (hostile.hp <= 0) {
+            if (hostile.hp <= 0 && hostile.disintegrate <= 0) {
               this.resolveKill(hostile, powerRating);
             }
             break;
@@ -593,15 +746,17 @@ export class BattlerEngine {
     }
 
     this.projectiles = remaining;
-    this.hostiles = this.hostiles.filter((h) => h.hp > 0);
   }
 
   private orderHostilesForShot(shot: Projectile): HostileConstruct[] {
+    const living = this.hostiles.filter(
+      (h) => h.disintegrate <= 0 && h.hp > 0,
+    );
     if (shot.targetId === null) {
-      return this.hostiles;
+      return living;
     }
-    const locked = this.hostiles.filter((h) => h.id === shot.targetId);
-    const others = this.hostiles.filter((h) => h.id !== shot.targetId);
+    const locked = living.filter((h) => h.id === shot.targetId);
+    const others = living.filter((h) => h.id !== shot.targetId);
     return [...locked, ...others];
   }
 
@@ -627,24 +782,26 @@ export class BattlerEngine {
   private resolveKill(hostile: HostileConstruct, powerRating: number): void {
     const store = useGameStore.getState();
     const rewardMult = hostile.isBoss ? COMBAT_BALANCE.bossRewardMultiplier : 1;
-    const standard =
+    const standard = Math.round(
       standardCreditsForKill(
         store.currentSectorWorld,
         store.currentSectorLevel,
         powerRating,
-      ) * rewardMult;
-    const gold =
+      ) * rewardMult,
+    );
+    const gold = Math.round(
       goldCreditsForKill(
         store.currentSectorWorld,
         store.currentSectorLevel,
-      ) * rewardMult;
+      ) * rewardMult,
+    );
     store.applyCombatVictory(standard, gold);
 
-    this.spawnDamageNumber(
-      hostile.x + hostile.width * 0.5,
-      hostile.y - 8,
-      standard,
-    );
+    // Begin luminous disintegrate; keep silhouette while credit arcs rise
+    hostile.hp = 0;
+    hostile.disintegrate = DISINTEGRATE_LIFE;
+    hostile.hitFlash = HIT_FLASH_LIFE * 1.6;
+    this.spawnCreditArcs(hostile, standard, gold);
 
     // Soft heal on sector clear (Wardens restore more hull after a gate clear)
     const healFrac = hostile.isBoss ? 0.2 : 0.08;
@@ -654,14 +811,53 @@ export class BattlerEngine {
     );
   }
 
-  private spawnDamageNumber(x: number, y: number, value: number): void {
+  private spawnCreditArcs(
+    hostile: HostileConstruct,
+    standard: number,
+    gold: number,
+  ): void {
+    const cx = hostile.x + hostile.width * 0.5;
+    const cy = hostile.y + hostile.height * 0.2;
+
+    this.creditPickups.push({
+      id: nextEntityId(),
+      kind: 'STANDARD',
+      amount: standard,
+      x: cx - 10,
+      y: cy,
+      vx: -28 - Math.random() * 18,
+      vy: -78 - Math.random() * 24,
+      life: 1.05,
+      maxLife: 1.05,
+    });
+
+    this.creditPickups.push({
+      id: nextEntityId(),
+      kind: 'GOLD',
+      amount: gold,
+      x: cx + 10,
+      y: cy,
+      vx: 26 + Math.random() * 18,
+      vy: -86 - Math.random() * 28,
+      life: 1.15,
+      maxLife: 1.15,
+    });
+  }
+
+  private spawnDamageNumber(
+    x: number,
+    y: number,
+    value: number,
+    isCrit = false,
+  ): void {
     this.damageNumbers.push({
       id: nextEntityId(),
       x,
       y,
       value: Math.round(value),
-      life: 0.7,
-      maxLife: 0.7,
+      life: isCrit ? 0.85 : 0.7,
+      maxLife: isCrit ? 0.85 : 0.7,
+      isCrit,
     });
   }
 
@@ -669,12 +865,28 @@ export class BattlerEngine {
     const next: DamageNumber[] = [];
     for (const dn of this.damageNumbers) {
       dn.life -= dt;
-      dn.y -= 28 * dt;
+      dn.y -= (dn.isCrit ? 36 : 28) * dt;
       if (dn.life > 0) {
         next.push(dn);
       }
     }
     this.damageNumbers = next;
+  }
+
+  private updateCreditPickups(dt: number): void {
+    const next: CreditPickup[] = [];
+    for (const pickup of this.creditPickups) {
+      pickup.life -= dt;
+      pickup.x += pickup.vx * dt;
+      pickup.y += pickup.vy * dt;
+      // Soft arc gravity — floats up then settles
+      pickup.vy += 110 * dt;
+      pickup.vx *= 1 - 0.55 * dt;
+      if (pickup.life > 0) {
+        next.push(pickup);
+      }
+    }
+    this.creditPickups = next;
   }
 
   private updateDpsMeter(dt: number): void {
