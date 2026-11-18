@@ -20,8 +20,18 @@
   "combat": {
     "supplyCacheDropChance": 0.4,
     "baseSalvageCredits": 12,
-    "enemyHpBase": 80,
-    "enemyHpPerTier": 28
+    "enemyHpBase": 45,
+    "enemyHpPerTier": 19,
+    "enemyHpPerWorld": 26,
+    "enemyDefenseBase": 2,
+    "enemyDefensePerTier": 1.1,
+    "enemyDefensePerWorld": 1.8,
+    "defenseMitigation": 0.4,
+    "fireRateBase": 1.0,
+    "fireRateCapBonus": 0.8,
+    "fireRatePrDivisor": 550,
+    "shotDamageMin": 16,
+    "shotDamagePerPr": 0.48
   },
   "monetization": {
     "interstitialEveryNLevels": 5,
