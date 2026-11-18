@@ -44,6 +44,8 @@ export interface HostileConstruct {
   speed: number;
   /** Inherent threat rating — used by STRONGEST / WEAKEST protocols */
   powerRating: number;
+  /** Sector Warden gate boss (every 5th sector level) */
+  isBoss: boolean;
 }
 
 export interface Projectile {
@@ -121,7 +123,19 @@ const COMBAT_BALANCE = {
   fireRatePrDivisor: 550,
   shotDamageMin: 16,
   shotDamagePerPr: 0.48,
+  /** Sector Warden (level % 5 === 0) */
+  bossHpMultiplier: 3.5,
+  bossRewardMultiplier: 3,
+  bossWidth: 52,
+  bossHeight: 64,
+  normalWidth: 34,
+  normalHeight: 42,
 } as const;
+
+/** Gate boss every 5th sector level (5, 10, …). */
+export function isSectorWardenLevel(level: number): boolean {
+  return level > 0 && level % 5 === 0;
+}
 
 function enemyStats(world: number, level: number): {
   hp: number;
@@ -380,6 +394,10 @@ export class BattlerEngine {
 
     this.regenerateShield(dt, powerRating);
     this.updateHostiles(dt);
+    if (this.exoRig.hp <= 0) {
+      this.resolveExoDestruction();
+      return;
+    }
     this.updatePlayerFire(dt, powerRating);
     this.updateProjectiles(dt, powerRating);
     this.updateDamageNumbers(dt);
@@ -402,20 +420,60 @@ export class BattlerEngine {
 
   private spawnHostile(): void {
     const store = useGameStore.getState();
-    const stats = enemyStats(store.currentSectorWorld, store.currentSectorLevel);
-    const height = 42;
+    const level = store.currentSectorLevel;
+    const isBoss = isSectorWardenLevel(level);
+    const stats = enemyStats(store.currentSectorWorld, level);
+    const hp = isBoss
+      ? Math.round(stats.hp * COMBAT_BALANCE.bossHpMultiplier)
+      : stats.hp;
+    const width = isBoss
+      ? COMBAT_BALANCE.bossWidth
+      : COMBAT_BALANCE.normalWidth;
+    const height = isBoss
+      ? COMBAT_BALANCE.bossHeight
+      : COMBAT_BALANCE.normalHeight;
+    const defense = isBoss
+      ? Math.round(stats.defense * 1.35)
+      : stats.defense;
+    const powerRating = isBoss
+      ? Math.round(stats.powerRating * COMBAT_BALANCE.bossHpMultiplier)
+      : stats.powerRating;
+    // Wardens advance slower — armored siege silhouette
+    const speed = isBoss ? stats.speed * 0.72 : stats.speed;
+
     this.hostiles.push({
       id: nextEntityId(),
       x: this.viewportWidth + 40,
       y: this.laneY(height),
-      width: 34,
+      width,
       height,
-      hp: stats.hp,
-      maxHp: stats.hp,
-      defense: stats.defense,
-      speed: stats.speed,
-      powerRating: stats.powerRating,
+      hp,
+      maxHp: hp,
+      defense,
+      speed,
+      powerRating,
+      isBoss,
     });
+  }
+
+  /**
+   * Hull integrity failed. Sector Warden kills rewind one level (min 1)
+   * so the pilot can farm gear and retry the gate.
+   */
+  private resolveExoDestruction(): void {
+    const store = useGameStore.getState();
+    const killedByBoss = this.hostiles.some((h) => h.isBoss);
+    if (killedByBoss) {
+      store.retreatFromBossDefeat();
+    }
+
+    this.exoRig.hp = this.exoRig.maxHp;
+    this.exoRig.shieldIntegrity = 80 + store.getTotalPowerRating() * 0.25;
+    this.exoRig.shieldFraction = 1;
+    this.hostiles = [];
+    this.projectiles = [];
+    this.fireCooldown = 0.4;
+    this.spawnHostile();
   }
 
   private updateHostiles(dt: number): void {
@@ -568,15 +626,18 @@ export class BattlerEngine {
 
   private resolveKill(hostile: HostileConstruct, powerRating: number): void {
     const store = useGameStore.getState();
-    const standard = standardCreditsForKill(
-      store.currentSectorWorld,
-      store.currentSectorLevel,
-      powerRating,
-    );
-    const gold = goldCreditsForKill(
-      store.currentSectorWorld,
-      store.currentSectorLevel,
-    );
+    const rewardMult = hostile.isBoss ? COMBAT_BALANCE.bossRewardMultiplier : 1;
+    const standard =
+      standardCreditsForKill(
+        store.currentSectorWorld,
+        store.currentSectorLevel,
+        powerRating,
+      ) * rewardMult;
+    const gold =
+      goldCreditsForKill(
+        store.currentSectorWorld,
+        store.currentSectorLevel,
+      ) * rewardMult;
     store.applyCombatVictory(standard, gold);
 
     this.spawnDamageNumber(
@@ -585,8 +646,12 @@ export class BattlerEngine {
       standard,
     );
 
-    // Soft heal on sector clear
-    this.exoRig.hp = Math.min(this.exoRig.maxHp, this.exoRig.hp + this.exoRig.maxHp * 0.08);
+    // Soft heal on sector clear (Wardens restore more hull after a gate clear)
+    const healFrac = hostile.isBoss ? 0.2 : 0.08;
+    this.exoRig.hp = Math.min(
+      this.exoRig.maxHp,
+      this.exoRig.hp + this.exoRig.maxHp * healFrac,
+    );
   }
 
   private spawnDamageNumber(x: number, y: number, value: number): void {

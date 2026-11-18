@@ -237,6 +237,11 @@ export interface GameStoreState extends PersistedGameSnapshot {
    * (level past 10 advances World and resets to 1).
    */
   applyCombatVictory: (standardCredits: number, goldCredits: number) => void;
+  /**
+   * Exo-Rig destroyed by a Sector Warden: drop one sector level (min 1)
+   * so the pilot can farm and retry the gate.
+   */
+  retreatFromBossDefeat: () => void;
   /** EQUIP & SALVAGE OLD — equip pending gear, salvage displaced item for Standard Credits */
   resolveComparisonEquip: () => void;
   /** SALVAGE IMMEDIATELY — salvage pending gear for Standard Credits */
@@ -343,6 +348,13 @@ export const useGameStore = create<GameStoreState>()(
         if (ads) {
           void ads.handleSectorProgress(completedLevel, currentSectorLevel);
         }
+      },
+
+      retreatFromBossDefeat: (): void => {
+        const state = get();
+        set({
+          currentSectorLevel: Math.max(1, state.currentSectorLevel - 1),
+        });
       },
 
       openCache: (): GearItem | null => {

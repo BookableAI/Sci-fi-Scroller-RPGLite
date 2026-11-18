@@ -23,6 +23,8 @@ export const COLORS = {
   violet: '#A78BFA',
   /** Warm status / salvage accent */
   amber: '#FBBF24',
+  /** Sector Warden armor / alert crimson */
+  crimson: '#DC2626',
   hull: '#C4D0E0',
   hostile: '#FB7185',
   projectile: '#7DD3FC',
