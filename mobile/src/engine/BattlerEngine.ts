@@ -103,6 +103,26 @@ function nextEntityId(): number {
   return entityId;
 }
 
+/**
+ * Early-game combat knobs (keep in sync with shared/BalanceConfig.json).
+ * Tuned so W1-L1 at baseline PR (~40) dies in a few seconds, not a slog,
+ * while later sectors still punish undergeared loadouts.
+ */
+const COMBAT_BALANCE = {
+  enemyHpBase: 45,
+  enemyHpPerTier: 19,
+  enemyHpPerWorld: 26,
+  enemyDefenseBase: 2,
+  enemyDefensePerTier: 1.1,
+  enemyDefensePerWorld: 1.8,
+  defenseMitigation: 0.4,
+  fireRateBase: 1.0,
+  fireRateCapBonus: 0.8,
+  fireRatePrDivisor: 550,
+  shotDamageMin: 16,
+  shotDamagePerPr: 0.48,
+} as const;
+
 function enemyStats(world: number, level: number): {
   hp: number;
   defense: number;
@@ -110,8 +130,16 @@ function enemyStats(world: number, level: number): {
   powerRating: number;
 } {
   const tier = (world - 1) * 10 + level;
-  const hp = Math.round(80 + tier * 28 + world * 40);
-  const defense = Math.round(4 + tier * 1.8 + world * 3);
+  const hp = Math.round(
+    COMBAT_BALANCE.enemyHpBase +
+      tier * COMBAT_BALANCE.enemyHpPerTier +
+      world * COMBAT_BALANCE.enemyHpPerWorld,
+  );
+  const defense = Math.round(
+    COMBAT_BALANCE.enemyDefenseBase +
+      tier * COMBAT_BALANCE.enemyDefensePerTier +
+      world * COMBAT_BALANCE.enemyDefensePerWorld,
+  );
   return {
     hp,
     defense,
@@ -413,9 +441,14 @@ export class BattlerEngine {
       return;
     }
 
-    const fireRate = 0.35 + Math.min(0.45, powerRating / 800);
+    const fireRate =
+      COMBAT_BALANCE.fireRateBase +
+      Math.min(COMBAT_BALANCE.fireRateCapBonus, powerRating / COMBAT_BALANCE.fireRatePrDivisor);
     this.fireCooldown = 1 / fireRate;
-    const damage = Math.max(6, powerRating * 0.22);
+    const damage = Math.max(
+      COMBAT_BALANCE.shotDamageMin,
+      powerRating * COMBAT_BALANCE.shotDamagePerPr,
+    );
 
     const originX = this.exoRig.x + this.exoRig.width;
     const originY = this.exoRig.y + this.exoRig.height * 0.4;
@@ -474,7 +507,10 @@ export class BattlerEngine {
         const ordered = this.orderHostilesForShot(shot);
         for (const hostile of ordered) {
           if (this.hitsHostile(shot, hostile)) {
-            const mitigated = Math.max(1, shot.damage - hostile.defense * 0.45);
+            const mitigated = Math.max(
+              1,
+              shot.damage - hostile.defense * COMBAT_BALANCE.defenseMitigation,
+            );
             hostile.hp -= mitigated;
             this.dpsWindowDamage += mitigated;
             this.spawnDamageNumber(hostile.x, hostile.y, mitigated);
