@@ -104,6 +104,26 @@ function getAdMobManager(): {
 
 const mmkvStateStorage: StateStorage = createPersistedStorage();
 
+/**
+ * World 2+ parallel auto-decrypt batch size: max(1, world - 1).
+ * World 1 stays manual (capacity 0).
+ */
+export function getBatchCapacity(currentSectorWorld: number): number {
+  if (currentSectorWorld < 2) {
+    return 0;
+  }
+  return Math.max(1, currentSectorWorld - 1);
+}
+
+/** Auto-salvage threshold chips shown in the Supply Cache bay */
+export const AUTO_SALVAGE_OPTIONS = [
+  'RARE',
+  'EPIC',
+  'LEGENDARY',
+] as const satisfies readonly Rarity[];
+
+export type AutoSalvageOption = (typeof AUTO_SALVAGE_OPTIONS)[number];
+
 export function computeTotalPowerRating(equipped: EquippedGear): number {
   let total = 0;
   for (const item of Object.values(equipped)) {
@@ -226,8 +246,16 @@ export interface GameStoreState extends PersistedGameSnapshot {
   salvageItem: (item: GearItem) => number;
   /** Spend Standard Credits only to start Cache Level fabrication */
   upgradeCacheLevel: () => boolean;
-  autoSalvageBelowThreshold: (rarity: Rarity) => number;
-  /** Tick Cache Upgrade fabrication only (auto-open / multi-open deferred) */
+  /** Persist World 2+ AUTO-DECRYPT toggle */
+  setAutoDecryptEnabled: (enabled: boolean) => void;
+  /**
+   * Set AUTO-SALVAGE BELOW threshold (or clear with null) and immediately
+   * salvage inventory gear below that rarity for Standard Credits.
+   */
+  autoSalvageBelowThreshold: (rarity: Rarity | null) => number;
+  /** World 2+ batch capacity for AUTO-DECRYPT opens per tick */
+  getBatchCapacity: () => number;
+  /** Tick Cache Upgrade fabrication + World 2+ AUTO-DECRYPT opens */
   tickFabrication: (deltaSeconds: number) => void;
   /** Sum of equipped Power Ratings (minimum baseline applied) */
   getTotalPowerRating: () => number;
@@ -273,6 +301,7 @@ export const useGameStore = create<GameStoreState>()(
       currentSectorLevel: 1,
       cacheLevel: 1,
       autoSalvageThreshold: null,
+      autoDecryptEnabled: false,
       cacheFabrication: null as CacheFabricationJob | null,
       pendingComparisonGear: null as GearItem | null,
       comparisonQueue: [] as GearItem[],
@@ -282,6 +311,12 @@ export const useGameStore = create<GameStoreState>()(
       setTargetingProtocol: (protocol: TargetingProtocol): void => {
         set({ targetingProtocol: protocol });
       },
+
+      setAutoDecryptEnabled: (enabled: boolean): void => {
+        set({ autoDecryptEnabled: enabled });
+      },
+
+      getBatchCapacity: (): number => getBatchCapacity(get().currentSectorWorld),
 
       getTotalPowerRating: (): number => computeTotalPowerRating(get().equippedGear),
 
@@ -479,8 +514,13 @@ export const useGameStore = create<GameStoreState>()(
         });
       },
 
-      autoSalvageBelowThreshold: (rarity: Rarity): number => {
+      autoSalvageBelowThreshold: (rarity: Rarity | null): number => {
         const state = get();
+        if (rarity === null) {
+          set({ autoSalvageThreshold: null });
+          return 0;
+        }
+
         const kept: Inventory = [];
         let gained = 0;
 
@@ -492,10 +532,26 @@ export const useGameStore = create<GameStoreState>()(
           }
         }
 
+        // Opened gear lives in inventory + comparison queue — prune both.
+        let comparisonQueue = state.comparisonQueue.filter(
+          (g) => RARITY_RANK[g.rarity] >= RARITY_RANK[rarity],
+        );
+        let pendingComparisonGear = state.pendingComparisonGear;
+        if (
+          pendingComparisonGear !== null &&
+          RARITY_RANK[pendingComparisonGear.rarity] < RARITY_RANK[rarity]
+        ) {
+          const advanced = advanceComparisonQueue(comparisonQueue);
+          pendingComparisonGear = advanced.pendingComparisonGear;
+          comparisonQueue = advanced.comparisonQueue;
+        }
+
         set({
           inventory: kept,
           standardCredits: state.standardCredits + gained,
           autoSalvageThreshold: rarity,
+          pendingComparisonGear,
+          comparisonQueue,
         });
         return gained;
       },
@@ -564,24 +620,82 @@ export const useGameStore = create<GameStoreState>()(
           return;
         }
 
-        const job = state.cacheFabrication;
-        if (!job) {
-          return;
+        let cacheLevel = state.cacheLevel;
+        let cacheFabrication = state.cacheFabrication
+          ? { ...state.cacheFabrication }
+          : null;
+
+        // Advance Cache Upgrade fabrication
+        if (cacheFabrication) {
+          const rate =
+            cacheFabrication.durationSeconds > 0
+              ? deltaSeconds / cacheFabrication.durationSeconds
+              : 1;
+          const progress = Math.min(1, cacheFabrication.progress + rate);
+          if (progress >= 1) {
+            cacheLevel = cacheFabrication.targetLevel;
+            cacheFabrication = null;
+          } else {
+            cacheFabrication = { ...cacheFabrication, progress };
+          }
         }
 
-        const rate =
-          job.durationSeconds > 0 ? deltaSeconds / job.durationSeconds : 1;
-        const progress = Math.min(1, job.progress + rate);
-        if (progress >= 1) {
-          set({
-            cacheLevel: job.targetLevel,
-            cacheFabrication: null,
-          });
+        let goldCredits = state.goldCredits;
+        let inventory = state.inventory;
+        let standardCredits = state.standardCredits;
+        let pendingComparisonGear = state.pendingComparisonGear;
+        let comparisonQueue = state.comparisonQueue;
+        let openedCount = 0;
+
+        // World 2+ AUTO-DECRYPT: spend Gold Credits up to batch capacity / cycle
+        const batchCapacity = getBatchCapacity(state.currentSectorWorld);
+        if (
+          state.autoDecryptEnabled &&
+          state.currentSectorWorld >= 2 &&
+          batchCapacity > 0
+        ) {
+          const maxOpens = Math.min(
+            batchCapacity,
+            Math.floor(goldCredits / OPEN_CACHE_GOLD_COST),
+          );
+          for (let i = 0; i < maxOpens; i += 1) {
+            goldCredits -= OPEN_CACHE_GOLD_COST;
+            const item = generateGearItem(cacheLevel);
+            const ingested = ingestOpenedGear(
+              {
+                inventory,
+                standardCredits,
+                autoSalvageThreshold: state.autoSalvageThreshold,
+                pendingComparisonGear,
+                comparisonQueue,
+              },
+              item,
+            );
+            inventory = ingested.inventory;
+            standardCredits = ingested.standardCredits;
+            pendingComparisonGear = ingested.pendingComparisonGear;
+            comparisonQueue = ingested.comparisonQueue;
+            openedCount += 1;
+          }
+        }
+
+        const fabricationChanged =
+          cacheLevel !== state.cacheLevel ||
+          cacheFabrication?.progress !== state.cacheFabrication?.progress ||
+          (cacheFabrication === null) !== (state.cacheFabrication === null);
+
+        if (!fabricationChanged && openedCount === 0) {
           return;
         }
 
         set({
-          cacheFabrication: { ...job, progress },
+          cacheLevel,
+          cacheFabrication,
+          goldCredits,
+          inventory,
+          standardCredits,
+          pendingComparisonGear,
+          comparisonQueue,
         });
       },
     }),
@@ -598,6 +712,7 @@ export const useGameStore = create<GameStoreState>()(
         currentSectorLevel: state.currentSectorLevel,
         cacheLevel: state.cacheLevel,
         autoSalvageThreshold: state.autoSalvageThreshold,
+        autoDecryptEnabled: state.autoDecryptEnabled,
         cacheFabrication: state.cacheFabrication,
         pendingComparisonGear: state.pendingComparisonGear,
         comparisonQueue: state.comparisonQueue,
@@ -621,6 +736,8 @@ export const useGameStore = create<GameStoreState>()(
           ...raw,
           standardCredits,
           goldCredits,
+          autoDecryptEnabled: raw.autoDecryptEnabled ?? false,
+          autoSalvageThreshold: raw.autoSalvageThreshold ?? null,
           cacheFabrication: raw.cacheFabrication ?? null,
           pendingComparisonGear: raw.pendingComparisonGear ?? null,
           comparisonQueue: raw.comparisonQueue ?? [],
