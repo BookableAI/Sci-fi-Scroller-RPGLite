@@ -273,7 +273,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   frameBorder: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderWidth: 1,
     borderColor: COLORS.grid,
   },
@@ -309,7 +309,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.cyan,
   },
   shieldRing: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderWidth: 1,
     borderRadius: 2,
   },
