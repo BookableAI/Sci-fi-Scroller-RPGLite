@@ -1,20 +1,34 @@
 /**
- * Supply Cache bay — single Open Cache (Gold) + upgrade (Standard Credits).
- * Auto-open / multi-open deferred.
+ * Supply Cache bay — Open Cache (Gold), World 2+ AUTO-DECRYPT,
+ * AUTO-SALVAGE threshold, upgrade (Standard Credits), drop-chance matrix.
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  Modal,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 
-import { getUpgradeRequirements } from '../../engine/ProbabilityMatrix';
-import { useGameStore } from '../../store/useGameStore';
+import {
+  resolveCacheLevelRow,
+  getUpgradeRequirements,
+} from '../../engine/ProbabilityMatrix';
+import {
+  AUTO_SALVAGE_OPTIONS,
+  getBatchCapacity,
+  useGameStore,
+  type AutoSalvageOption,
+} from '../../store/useGameStore';
 import { COLORS, FONTS, RADII } from '../../theme/colors';
-import { OPEN_CACHE_GOLD_COST } from '../../types/game';
+import {
+  OPEN_CACHE_GOLD_COST,
+  RARITIES,
+  RARITY_RANK,
+  type Rarity,
+} from '../../types/game';
 
 /** Lazy monetization accessors — keep ads/purchases packages off the CacheGrid module graph. */
 function getAdMobManager(): {
@@ -63,15 +77,40 @@ function formatAmount(n: number): string {
   return n.toLocaleString('en-US');
 }
 
+function formatPercent(n: number): string {
+  if (n === 0) return '—';
+  if (Number.isInteger(n)) return `${n}%`;
+  return `${n.toFixed(1)}%`;
+}
+
+const RARITY_TINT: Readonly<Record<Rarity, string>> = {
+  COMMON: COLORS.muted,
+  UNCOMMON: COLORS.teal,
+  RARE: COLORS.cyan,
+  EPIC: COLORS.violet,
+  LEGENDARY: COLORS.amber,
+  MYTHIC: COLORS.gold,
+  CELESTIAL: COLORS.celestial,
+};
+
 export function CacheGrid(): React.ReactElement {
   const cacheLevel = useGameStore((s) => s.cacheLevel);
   const standardCredits = useGameStore((s) => s.standardCredits);
   const goldCredits = useGameStore((s) => s.goldCredits);
+  const world = useGameStore((s) => s.currentSectorWorld);
   const fabrication = useGameStore((s) => s.cacheFabrication);
   const overclockExpiresAtMs = useGameStore((s) => s.overclockExpiresAtMs);
+  const autoDecryptEnabled = useGameStore((s) => s.autoDecryptEnabled);
+  const autoSalvageThreshold = useGameStore((s) => s.autoSalvageThreshold);
   const openCache = useGameStore((s) => s.openCache);
   const upgradeCacheLevel = useGameStore((s) => s.upgradeCacheLevel);
   const tickFabrication = useGameStore((s) => s.tickFabrication);
+  const setAutoDecryptEnabled = useGameStore((s) => s.setAutoDecryptEnabled);
+  const autoSalvageBelowThreshold = useGameStore(
+    (s) => s.autoSalvageBelowThreshold,
+  );
+
+  const [dropModalVisible, setDropModalVisible] = useState(false);
 
   const lastTickRef = useRef<number>(Date.now());
   const overclockActive =
@@ -93,15 +132,23 @@ export function CacheGrid(): React.ReactElement {
   }, [tickFabrication]);
 
   const upgradeReqs =
-    cacheLevel >= 15
-      ? null
-      : getUpgradeRequirements(cacheLevel);
+    cacheLevel >= 15 ? null : getUpgradeRequirements(cacheLevel);
   const canAffordUpgrade =
     upgradeReqs !== null &&
     standardCredits >= upgradeReqs.costCredits &&
     fabrication === null;
   const canOpenCache = goldCredits >= OPEN_CACHE_GOLD_COST;
   const fabricationPct = Math.round((fabrication?.progress ?? 0) * 100);
+  const batchCapacity = getBatchCapacity(world);
+  const dropRow = resolveCacheLevelRow(cacheLevel);
+
+  const onSalvageChip = (option: AutoSalvageOption): void => {
+    if (autoSalvageThreshold === option) {
+      autoSalvageBelowThreshold(null);
+      return;
+    }
+    autoSalvageBelowThreshold(option);
+  };
 
   return (
     <View style={styles.root}>
@@ -142,9 +189,83 @@ export function CacheGrid(): React.ReactElement {
         </Text>
       </Pressable>
 
+      {world >= 2 && (
+        <View style={styles.autoPanel}>
+          <Pressable
+            accessibilityRole="switch"
+            accessibilityState={{ checked: autoDecryptEnabled }}
+            accessibilityLabel="Auto-decrypt toggle"
+            onPress={() => {
+              setAutoDecryptEnabled(!autoDecryptEnabled);
+            }}
+            style={[
+              styles.autoDecryptBtn,
+              autoDecryptEnabled && styles.autoDecryptBtnActive,
+            ]}
+          >
+            <Text
+              style={[
+                styles.autoDecryptLabel,
+                autoDecryptEnabled && styles.autoDecryptLabelActive,
+              ]}
+            >
+              {autoDecryptEnabled
+                ? 'AUTO-DECRYPT · ENGAGED'
+                : 'AUTO-DECRYPT · STANDBY'}
+            </Text>
+            <Text style={styles.autoDecryptMeta}>
+              {`BATCH ${batchCapacity}/CYCLE  ·  WORLD ${world}  ·  ${OPEN_CACHE_GOLD_COST} GC EACH`}
+            </Text>
+          </Pressable>
+
+          <Text style={styles.salvageLabel}>AUTO-SALVAGE BELOW</Text>
+          <View style={styles.salvageRow}>
+            {AUTO_SALVAGE_OPTIONS.map((option) => {
+              const active = autoSalvageThreshold === option;
+              return (
+                <Pressable
+                  key={option}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={`Auto-salvage below ${option}`}
+                  onPress={() => {
+                    onSalvageChip(option);
+                  }}
+                  style={[
+                    styles.salvageChip,
+                    active && styles.salvageChipActive,
+                    active && {
+                      borderColor: RARITY_TINT[option],
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.salvageChipText,
+                      active && {
+                        color: RARITY_TINT[option],
+                      },
+                    ]}
+                  >
+                    {option}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={styles.salvageHint}>
+            {autoSalvageThreshold
+              ? `GEAR BELOW ${autoSalvageThreshold} → STC · ${autoSalvageThreshold}+ SHOWS COMPARISON`
+              : 'TAP A RARITY TO AUTO-SALVAGE WEAKER DROPS'}
+          </Text>
+        </View>
+      )}
+
       <View style={styles.upgradePanel}>
         <View style={styles.upgradeHeader}>
-          <Text style={styles.upgradeLevel}>{`CACHE UPGRADE LEVEL ${cacheLevel}`}</Text>
+          <Text style={styles.upgradeLevel}>
+            {`CACHE UPGRADE LEVEL ${cacheLevel}`}
+          </Text>
           {fabrication && (
             <Text style={styles.fabLabel}>
               {`FABRICATING → L${fabrication.targetLevel}  ${fabricationPct}%`}
@@ -165,46 +286,67 @@ export function CacheGrid(): React.ReactElement {
           />
         </View>
 
-        {cacheLevel >= 15 ? (
-          <Text style={styles.maxed}>CACHE MATRIX MAXED (L15)</Text>
-        ) : (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Upgrade Cache Level"
-            disabled={!canAffordUpgrade}
-            onPress={() => {
-              upgradeCacheLevel();
-            }}
-            style={[styles.upgradeBtn, !canAffordUpgrade && styles.upgradeBtnDisabled]}
-          >
-            <Text
+        <View style={styles.upgradeRow}>
+          {cacheLevel >= 15 ? (
+            <Text style={[styles.maxed, styles.upgradeFlex]}>
+              CACHE MATRIX MAXED (L15)
+            </Text>
+          ) : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Upgrade Cache Level"
+              disabled={!canAffordUpgrade}
+              onPress={() => {
+                upgradeCacheLevel();
+              }}
               style={[
-                styles.upgradeBtnText,
-                !canAffordUpgrade && styles.disabledText,
+                styles.upgradeBtn,
+                styles.upgradeFlex,
+                !canAffordUpgrade && styles.upgradeBtnDisabled,
               ]}
             >
-              UPGRADE CACHE LEVEL
-            </Text>
-            {upgradeReqs && (
               <Text
                 style={[
-                  styles.upgradeCost,
+                  styles.upgradeBtnText,
                   !canAffordUpgrade && styles.disabledText,
                 ]}
               >
-                {fabrication
-                  ? `FABRICATION ${formatTimer(
-                      Math.ceil(
-                        fabrication.durationSeconds * (1 - fabrication.progress),
-                      ),
-                    )} REMAINING`
-                  : `${formatAmount(upgradeReqs.costCredits)} STC  ·  ${formatTimer(
-                      upgradeReqs.timerSeconds,
-                    )}`}
+                UPGRADE CACHE LEVEL
               </Text>
-            )}
+              {upgradeReqs && (
+                <Text
+                  style={[
+                    styles.upgradeCost,
+                    !canAffordUpgrade && styles.disabledText,
+                  ]}
+                >
+                  {fabrication
+                    ? `FABRICATION ${formatTimer(
+                        Math.ceil(
+                          fabrication.durationSeconds *
+                            (1 - fabrication.progress),
+                        ),
+                      )} REMAINING`
+                    : `${formatAmount(upgradeReqs.costCredits)} STC  ·  ${formatTimer(
+                        upgradeReqs.timerSeconds,
+                      )}`}
+                </Text>
+              )}
+            </Pressable>
+          )}
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Show drop chances for current cache level"
+            onPress={() => {
+              setDropModalVisible(true);
+            }}
+            style={styles.dropChanceBtn}
+          >
+            <Text style={styles.dropChanceBtnText}>DROP %</Text>
+            <Text style={styles.dropChanceBtnMeta}>{`L${cacheLevel}`}</Text>
           </Pressable>
-        )}
+        </View>
 
         {fabrication !== null && (
           <Pressable
@@ -285,6 +427,78 @@ export function CacheGrid(): React.ReactElement {
           </Pressable>
         </View>
       </View>
+
+      <Modal
+        animationType="fade"
+        transparent
+        visible={dropModalVisible}
+        onRequestClose={() => {
+          setDropModalVisible(false);
+        }}
+      >
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss drop chances"
+          style={styles.modalBackdrop}
+          onPress={() => {
+            setDropModalVisible(false);
+          }}
+        >
+          <Pressable
+            accessibilityRole="none"
+            onPress={(e) => {
+              e.stopPropagation?.();
+            }}
+            style={styles.modalCard}
+          >
+            <Text style={styles.modalTitle}>
+              {`DROP MATRIX · CACHE L${dropRow.level}`}
+            </Text>
+            <Text style={styles.modalSubtitle}>
+              PROBABILITY MATRIX §2.5 · CURRENT TIER WEIGHTS
+            </Text>
+            {RARITIES.map((rarity) => {
+              const weight = dropRow.weights[rarity];
+              const muted = weight <= 0;
+              return (
+                <View key={rarity} style={styles.dropRow}>
+                  <Text
+                    style={[
+                      styles.dropRarity,
+                      { color: muted ? COLORS.muted : RARITY_TINT[rarity] },
+                    ]}
+                  >
+                    {rarity}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.dropPct,
+                      muted && styles.disabledText,
+                      !muted &&
+                        autoSalvageThreshold !== null &&
+                        RARITY_RANK[rarity] <
+                          RARITY_RANK[autoSalvageThreshold] &&
+                        styles.dropPctSalvage,
+                    ]}
+                  >
+                    {formatPercent(weight)}
+                  </Text>
+                </View>
+              );
+            })}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close drop chances"
+              onPress={() => {
+                setDropModalVisible(false);
+              }}
+              style={styles.modalClose}
+            >
+              <Text style={styles.modalCloseText}>CLOSE</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -357,6 +571,78 @@ const styles = StyleSheet.create({
   disabledText: {
     color: COLORS.muted,
   },
+  autoPanel: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: COLORS.borderGlow,
+    borderRadius: RADII.sm,
+    backgroundColor: COLORS.void,
+    padding: 8,
+  },
+  autoDecryptBtn: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADII.sm,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+  },
+  autoDecryptBtnActive: {
+    borderColor: COLORS.teal,
+    backgroundColor: COLORS.panelElevated,
+  },
+  autoDecryptLabel: {
+    color: COLORS.muted,
+    fontFamily: FONTS.mono,
+    fontSize: 11,
+    letterSpacing: 0.9,
+  },
+  autoDecryptLabelActive: {
+    color: COLORS.teal,
+  },
+  autoDecryptMeta: {
+    marginTop: 3,
+    color: COLORS.muted,
+    fontFamily: FONTS.mono,
+    fontSize: 8,
+    letterSpacing: 0.3,
+  },
+  salvageLabel: {
+    marginTop: 10,
+    color: COLORS.muted,
+    fontFamily: FONTS.mono,
+    fontSize: 9,
+    letterSpacing: 0.8,
+  },
+  salvageRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 6,
+  },
+  salvageChip: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADII.sm,
+    paddingVertical: 7,
+    alignItems: 'center',
+  },
+  salvageChipActive: {
+    backgroundColor: COLORS.panelElevated,
+  },
+  salvageChipText: {
+    color: COLORS.muted,
+    fontFamily: FONTS.mono,
+    fontSize: 9,
+    letterSpacing: 0.6,
+  },
+  salvageHint: {
+    marginTop: 6,
+    color: COLORS.muted,
+    fontFamily: FONTS.mono,
+    fontSize: 8,
+    letterSpacing: 0.2,
+  },
   upgradePanel: {
     marginTop: 10,
     borderTopWidth: 1,
@@ -389,6 +675,14 @@ const styles = StyleSheet.create({
     height: 4,
     backgroundColor: COLORS.cyan,
   },
+  upgradeRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 8,
+  },
+  upgradeFlex: {
+    flex: 1,
+  },
   upgradeBtn: {
     borderWidth: 1,
     borderColor: COLORS.cyan,
@@ -396,6 +690,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 10,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   upgradeBtnDisabled: {
     borderColor: COLORS.border,
@@ -411,6 +706,28 @@ const styles = StyleSheet.create({
     color: COLORS.teal,
     fontFamily: FONTS.mono,
     fontSize: 9,
+  },
+  dropChanceBtn: {
+    borderWidth: 1,
+    borderColor: COLORS.violet,
+    borderRadius: RADII.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 64,
+  },
+  dropChanceBtnText: {
+    color: COLORS.violet,
+    fontFamily: FONTS.mono,
+    fontSize: 10,
+    letterSpacing: 0.7,
+  },
+  dropChanceBtnMeta: {
+    marginTop: 2,
+    color: COLORS.muted,
+    fontFamily: FONTS.mono,
+    fontSize: 8,
   },
   maxed: {
     color: COLORS.muted,
@@ -474,5 +791,67 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.mono,
     fontSize: 9,
     letterSpacing: 0.5,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: COLORS.backdrop,
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+  },
+  modalCard: {
+    backgroundColor: COLORS.panelElevated,
+    borderWidth: 1,
+    borderColor: COLORS.borderGlow,
+    borderRadius: RADII.md,
+    padding: 14,
+  },
+  modalTitle: {
+    color: COLORS.violet,
+    fontFamily: FONTS.mono,
+    fontSize: 12,
+    letterSpacing: 1,
+  },
+  modalSubtitle: {
+    marginTop: 4,
+    marginBottom: 12,
+    color: COLORS.muted,
+    fontFamily: FONTS.mono,
+    fontSize: 8,
+    letterSpacing: 0.4,
+  },
+  dropRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 5,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.border,
+  },
+  dropRarity: {
+    fontFamily: FONTS.mono,
+    fontSize: 11,
+    letterSpacing: 0.7,
+  },
+  dropPct: {
+    color: COLORS.text,
+    fontFamily: FONTS.mono,
+    fontSize: 11,
+  },
+  dropPctSalvage: {
+    color: COLORS.amber,
+  },
+  modalClose: {
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: COLORS.cyan,
+    borderRadius: RADII.sm,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  modalCloseText: {
+    color: COLORS.cyan,
+    fontFamily: FONTS.mono,
+    fontSize: 11,
+    letterSpacing: 1,
   },
 });

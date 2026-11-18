@@ -1,6 +1,6 @@
 /**
- * Gear comparison modal — shown after Open Cache yields a module.
- * New gear vs equipped slot; PR delta cyan (+) / amber (−).
+ * Gear comparison modal — cache yield vs equipped slot.
+ * Infographic: Power Rating + primary/secondary deltas (cyan ↑ / amber ↓).
  */
 
 import React from 'react';
@@ -24,6 +24,26 @@ const SLOT_LABEL: Readonly<Record<GearItem['slot'], string>> = {
   CORE_AI: 'CORE AI',
   UTILITY: 'UTILITY MODULE',
 };
+
+type DeltaTone = 'up' | 'down' | 'flat';
+
+function deltaTone(delta: number): DeltaTone {
+  if (delta > 0) return 'up';
+  if (delta < 0) return 'down';
+  return 'flat';
+}
+
+function formatSigned(delta: number): string {
+  if (delta > 0) return `+${delta}`;
+  if (delta < 0) return `${delta}`;
+  return '±0';
+}
+
+function toneColor(tone: DeltaTone): string {
+  if (tone === 'up') return COLORS.cyan;
+  if (tone === 'down') return COLORS.amber;
+  return COLORS.muted;
+}
 
 function GearColumn({
   title,
@@ -55,6 +75,59 @@ function GearColumn({
   );
 }
 
+function DeltaBar({
+  label,
+  newValue,
+  oldValue,
+  emphasize = false,
+}: {
+  label: string;
+  newValue: number;
+  oldValue: number;
+  emphasize?: boolean;
+}): React.ReactElement {
+  const delta = newValue - oldValue;
+  const tone = deltaTone(delta);
+  const color = toneColor(tone);
+  const arrow = tone === 'up' ? '▲' : tone === 'down' ? '▼' : '●';
+  const magnitude = Math.abs(delta);
+  // Visual weight for the bar fill — caps so large jumps don't overflow
+  const fillPct = Math.min(100, Math.round((magnitude / Math.max(oldValue, 1)) * 100));
+
+  return (
+    <View style={[styles.deltaBar, emphasize && styles.deltaBarHero]}>
+      <View style={styles.deltaBarHeader}>
+        <Text style={[styles.deltaBarLabel, emphasize && styles.deltaBarLabelHero]}>
+          {label}
+        </Text>
+        <Text
+          style={[
+            styles.deltaBarValue,
+            emphasize && styles.deltaBarValueHero,
+            { color },
+          ]}
+        >
+          {`${arrow} ${formatSigned(delta)}`}
+        </Text>
+      </View>
+      <View style={styles.deltaTrack}>
+        <View
+          style={[
+            styles.deltaFill,
+            {
+              width: (`${tone === 'flat' ? 0 : Math.max(fillPct, 8)}%` as `${number}%`),
+              backgroundColor: color,
+            },
+          ]}
+        />
+      </View>
+      <Text style={styles.deltaCompare}>
+        {`${oldValue} → ${newValue}`}
+      </Text>
+    </View>
+  );
+}
+
 export function GearComparisonModal(): React.ReactElement | null {
   const pending = useGameStore((s) => s.pendingComparisonGear);
   const equippedGear = useGameStore((s) => s.equippedGear);
@@ -67,14 +140,21 @@ export function GearComparisonModal(): React.ReactElement | null {
   }
 
   const equipped = equippedGear[pending.slot];
-  const delta = pending.powerRating - (equipped?.powerRating ?? 0);
-  const deltaPositive = delta >= 0;
-  const deltaLabel =
-    delta === 0
-      ? '±0 PR'
-      : deltaPositive
-        ? `+${delta} PR`
-        : `${delta} PR`;
+  const oldPr = equipped?.powerRating ?? 0;
+  const oldPri = equipped?.primaryStat ?? 0;
+  const oldSec = equipped?.secondaryStat ?? 0;
+  const oldSalvage = equipped?.salvageValue ?? 0;
+
+  const prDelta = pending.powerRating - oldPr;
+  const verdictTone = deltaTone(prDelta);
+  const verdict =
+    !equipped
+      ? 'EMPTY SLOT · EQUIP RECOMMENDED'
+      : verdictTone === 'up'
+        ? 'POWER UP · EQUIP LOOKS STRONGER'
+        : verdictTone === 'down'
+          ? 'POWER DOWN · CONSIDER SALVAGE'
+          : 'EVEN POWER · JUDGE BY STATS';
 
   return (
     <Modal
@@ -110,16 +190,33 @@ export function GearComparisonModal(): React.ReactElement | null {
             />
           </View>
 
-          <View style={styles.deltaRow}>
-            <Text style={styles.deltaLabel}>POWER RATING DELTA</Text>
-            <Text
-              style={[
-                styles.deltaValue,
-                deltaPositive ? styles.deltaCyan : styles.deltaAmber,
-              ]}
-            >
-              {deltaLabel}
+          <View style={styles.infographic}>
+            <Text style={styles.infographicTitle}>TELEMETRY DELTA</Text>
+            <Text style={[styles.verdict, { color: toneColor(verdictTone) }]}>
+              {verdict}
             </Text>
+
+            <DeltaBar
+              label="POWER RATING"
+              newValue={pending.powerRating}
+              oldValue={oldPr}
+              emphasize
+            />
+            <DeltaBar
+              label="PRIMARY STAT"
+              newValue={pending.primaryStat}
+              oldValue={oldPri}
+            />
+            <DeltaBar
+              label="SECONDARY STAT"
+              newValue={pending.secondaryStat}
+              oldValue={oldSec}
+            />
+            <DeltaBar
+              label="SALVAGE VALUE (STC)"
+              newValue={pending.salvageValue}
+              oldValue={oldSalvage}
+            />
           </View>
 
           <Pressable
@@ -137,7 +234,9 @@ export function GearComparisonModal(): React.ReactElement | null {
             onPress={resolveComparisonSalvage}
             style={styles.secondaryBtn}
           >
-            <Text style={styles.secondaryBtnText}>SALVAGE IMMEDIATELY</Text>
+            <Text style={styles.secondaryBtnText}>
+              {`SALVAGE IMMEDIATELY · +${pending.salvageValue} STC`}
+            </Text>
           </Pressable>
         </View>
       </View>
@@ -225,35 +324,76 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.mono,
     fontSize: 9,
   },
-  deltaRow: {
+  infographic: {
     marginTop: 14,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: COLORS.borderGlow,
     borderRadius: RADII.sm,
     backgroundColor: COLORS.void,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
+    padding: 10,
+    gap: 8,
+  },
+  infographicTitle: {
+    color: COLORS.muted,
+    fontFamily: FONTS.mono,
+    fontSize: 9,
+    letterSpacing: 0.8,
+  },
+  verdict: {
+    fontFamily: FONTS.mono,
+    fontSize: 10,
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  deltaBar: {
+    gap: 3,
+  },
+  deltaBarHero: {
+    paddingBottom: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.border,
+    marginBottom: 2,
+  },
+  deltaBarHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  deltaLabel: {
+  deltaBarLabel: {
     color: COLORS.muted,
     fontFamily: FONTS.mono,
     fontSize: 9,
-    letterSpacing: 0.6,
-  },
-  deltaValue: {
-    fontFamily: FONTS.mono,
-    fontSize: 16,
     letterSpacing: 0.5,
   },
-  deltaCyan: {
-    color: COLORS.cyan,
+  deltaBarLabelHero: {
+    color: COLORS.text,
+    fontSize: 10,
+    letterSpacing: 0.7,
   },
-  deltaAmber: {
-    color: COLORS.amber,
+  deltaBarValue: {
+    fontFamily: FONTS.mono,
+    fontSize: 12,
+    letterSpacing: 0.4,
+  },
+  deltaBarValueHero: {
+    fontSize: 18,
+    letterSpacing: 0.6,
+  },
+  deltaTrack: {
+    height: 4,
+    backgroundColor: COLORS.border,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  deltaFill: {
+    height: 4,
+    borderRadius: 2,
+  },
+  deltaCompare: {
+    color: COLORS.muted,
+    fontFamily: FONTS.mono,
+    fontSize: 8,
   },
   primaryBtn: {
     borderWidth: 1,

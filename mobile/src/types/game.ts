@@ -111,6 +111,11 @@ export type PersistedGameSnapshot = {
   cacheLevel: number;
   /** Rarity below which auto-salvage applies; null disables filter */
   autoSalvageThreshold: Rarity | null;
+  /**
+   * World 2+ AUTO-DECRYPT: auto-spend Gold Credits to open caches
+   * up to batch capacity per tick cycle. Ignored in World 1.
+   */
+  autoDecryptEnabled: boolean;
   /** In-progress Cache Upgrade fabrication; null when idle */
   cacheFabrication: CacheFabricationJob | null;
   /**
