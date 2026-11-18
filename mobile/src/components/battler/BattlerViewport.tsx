@@ -153,6 +153,7 @@ function HostileView({
   isAimTarget: boolean;
 }): React.ReactElement {
   const pct = Math.max(0, (hostile.hp / hostile.maxHp) * 100);
+  const isBoss = hostile.isBoss;
   return (
     <View
       style={[
@@ -164,14 +165,30 @@ function HostileView({
           height: hostile.height,
         },
         isAimTarget && styles.hostileAimed,
+        isBoss && styles.wardenAimed,
       ]}
     >
-      <View style={styles.hostileBody} />
-      <View style={styles.hpTrack}>
+      {isBoss ? (
+        <View style={styles.wardenSilhouette}>
+          <View style={styles.wardenPauldronLeft} />
+          <View style={styles.wardenPauldronRight} />
+          <View style={styles.wardenCore} />
+          <View style={styles.wardenPlating} />
+        </View>
+      ) : (
+        <View style={styles.hostileBody} />
+      )}
+      <View
+        style={[
+          styles.hpTrack,
+          isBoss && styles.wardenShieldTrack,
+        ]}
+      >
         <View
           style={[
             styles.hpFill,
             { width: `${pct}%`, backgroundColor: COLORS.amber },
+            isBoss && styles.wardenShieldFill,
           ]}
         />
       </View>
@@ -206,10 +223,17 @@ function DamageNumberView({ dn }: { dn: DamageNumber }) {
 
 function TelemetryOverlay({ snapshot }: { snapshot: BattlerSnapshot }) {
   const { telemetry } = snapshot;
+  const wardenActive = snapshot.hostiles.some((h) => h.isBoss);
   return (
     <View style={styles.overlay}>
-      <Text style={styles.sectorReadout}>
+      <Text
+        style={[
+          styles.sectorReadout,
+          wardenActive && styles.wardenReadout,
+        ]}
+      >
         {`SECTOR [${telemetry.sectorWorld}]-[${telemetry.sectorLevel}]`}
+        {wardenActive ? '  ·  WARDEN' : ''}
       </Text>
       <View style={styles.telemetryRow}>
         <Text style={styles.telemetryText}>
@@ -330,6 +354,12 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 3,
   },
+  wardenAimed: {
+    shadowColor: COLORS.crimson,
+    shadowOpacity: 0.65,
+    shadowRadius: 8,
+    elevation: 4,
+  },
   hostileBody: {
     width: '100%',
     height: '85%',
@@ -337,6 +367,54 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.hostile,
     borderRadius: RADII.sm,
+  },
+  wardenSilhouette: {
+    width: '100%',
+    height: '86%',
+    backgroundColor: COLORS.panel,
+    borderWidth: 2,
+    borderColor: COLORS.crimson,
+    borderRadius: RADII.sm,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  wardenCore: {
+    width: '42%',
+    height: '58%',
+    backgroundColor: COLORS.panelElevated,
+    borderWidth: 1,
+    borderColor: COLORS.amber,
+    borderRadius: RADII.sm,
+  },
+  wardenPlating: {
+    position: 'absolute',
+    bottom: 4,
+    width: '78%',
+    height: '18%',
+    backgroundColor: COLORS.borderGlow,
+    borderWidth: 1,
+    borderColor: COLORS.crimson,
+  },
+  wardenPauldronLeft: {
+    position: 'absolute',
+    left: 2,
+    top: '18%',
+    width: '22%',
+    height: '38%',
+    backgroundColor: COLORS.border,
+    borderWidth: 1,
+    borderColor: COLORS.amber,
+  },
+  wardenPauldronRight: {
+    position: 'absolute',
+    right: 2,
+    top: '18%',
+    width: '22%',
+    height: '38%',
+    backgroundColor: COLORS.border,
+    borderWidth: 1,
+    borderColor: COLORS.amber,
   },
   hpTrack: {
     marginTop: 3,
@@ -346,8 +424,17 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     overflow: 'hidden',
   },
+  wardenShieldTrack: {
+    height: 5,
+    backgroundColor: COLORS.crimson,
+    borderWidth: 1,
+    borderColor: COLORS.crimson,
+  },
   hpFill: {
     height: '100%',
+  },
+  wardenShieldFill: {
+    backgroundColor: COLORS.amber,
   },
   projectile: {
     position: 'absolute',
@@ -377,6 +464,9 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.mono,
     fontSize: 13,
     letterSpacing: 1,
+  },
+  wardenReadout: {
+    color: COLORS.amber,
   },
   telemetryRow: {
     marginTop: 4,
