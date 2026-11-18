@@ -3,6 +3,7 @@
  *
  * Soft-fails in Expo Go / when the native module is unavailable.
  * RevenueCat is JS-configured (Purchases.configure); it is not an Expo config plugin.
+ * Never statically imports react-native-purchases — require only after a native probe.
  */
 
 import { Platform } from 'react-native';
@@ -15,12 +16,36 @@ import {
 } from '../types/monetization';
 import { useGameStore } from '../store/useGameStore';
 import { RevenueCatConfig } from './monetizationConfig';
-import { hasCustomNativeModules } from './nativeAvailability';
+import {
+  NATIVE_MODULE_NAMES,
+  canRequireNativeModule,
+} from './nativeAvailability';
 
-type PurchasesAPI = typeof import('react-native-purchases').default;
-type CustomerInfo = import('react-native-purchases').CustomerInfo;
-type PurchasesPackage = import('react-native-purchases').PurchasesPackage;
-type PurchasesErrorCode = typeof import('react-native-purchases').PURCHASES_ERROR_CODE;
+type PurchasesAPI = {
+  configure: (opts: { apiKey: string; appUserID?: string }) => void;
+  getCustomerInfo: () => Promise<CustomerInfo>;
+  getOfferings: () => Promise<{
+    current: { availablePackages: PurchasesPackage[] } | null;
+    all?: Record<string, { availablePackages: PurchasesPackage[] }>;
+  }>;
+  purchasePackage: (
+    pkg: PurchasesPackage,
+  ) => Promise<{ customerInfo: CustomerInfo }>;
+  restorePurchases: () => Promise<CustomerInfo>;
+  PURCHASES_ERROR_CODE?: PurchasesErrorCode;
+};
+
+type CustomerInfo = {
+  entitlements: { active: Record<string, unknown> };
+};
+
+type PurchasesPackage = {
+  product: { identifier: string };
+};
+
+type PurchasesErrorCode = {
+  PURCHASE_CANCELLED_ERROR: string;
+};
 
 export type PurchaseResult =
   | { ok: true; customerInfo: CustomerInfo }
@@ -35,7 +60,7 @@ function loadPurchasesModule(): PurchasesAPI | null {
   if (purchasesApi !== undefined) {
     return purchasesApi;
   }
-  if (!hasCustomNativeModules()) {
+  if (!canRequireNativeModule(NATIVE_MODULE_NAMES.purchases)) {
     purchasesApi = null;
     return purchasesApi;
   }

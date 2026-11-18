@@ -1,6 +1,9 @@
 /**
  * Sector Sentinel — root shell.
  * Strict layout: top 38% combat diorama / bottom 62% interactive telemetry.
+ *
+ * AdMob / Purchases are lazy-required inside useEffect so Expo Go never evaluates
+ * react-native-google-mobile-ads (TurboModuleRegistry.getEnforcing) at startup.
  */
 
 import React, { useEffect } from 'react';
@@ -10,8 +13,6 @@ import { BattlerViewport } from './components/battler/BattlerViewport';
 import { CacheGrid } from './components/cache/CacheGrid';
 import { GearComparisonModal } from './components/cache/GearComparisonModal';
 import { TelemetryPanel } from './components/ui/TelemetryPanel';
-import { AdMobManager } from './services/AdMobManager';
-import { PurchaseManager } from './services/PurchaseManager';
 
 const COLORS = {
   obsidian: '#0B0E14',
@@ -39,13 +40,21 @@ export default function App(): React.ReactElement {
   useEffect(() => {
     // Soft-fail: native AdMob / Purchases are unavailable in Expo Go.
     try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { AdMobManager } = require('./services/AdMobManager') as typeof import('./services/AdMobManager');
       AdMobManager.initialize();
     } catch (error) {
       console.warn('[App] AdMobManager.initialize soft-failed', error);
     }
-    void PurchaseManager.configure().catch((error) => {
-      console.warn('[App] PurchaseManager.configure soft-failed', error);
-    });
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { PurchaseManager } = require('./services/PurchaseManager') as typeof import('./services/PurchaseManager');
+      void PurchaseManager.configure().catch((error) => {
+        console.warn('[App] PurchaseManager.configure soft-failed', error);
+      });
+    } catch (error) {
+      console.warn('[App] PurchaseManager soft-failed', error);
+    }
   }, []);
 
   return (

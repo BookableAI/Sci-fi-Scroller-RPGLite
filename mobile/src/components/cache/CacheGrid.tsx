@@ -11,13 +11,41 @@ import {
 } from 'react-native';
 
 import { getUpgradeRequirements } from '../../engine/ProbabilityMatrix';
-import { AdMobManager } from '../../services/AdMobManager';
-import { PurchaseManager } from '../../services/PurchaseManager';
 import {
   getBatchCapacity,
   useGameStore,
 } from '../../store/useGameStore';
 import { CACHE_BUFFER_CAPACITY, type SupplyCache } from '../../types/game';
+
+/** Lazy monetization accessors — keep ads/purchases packages off the CacheGrid module graph. */
+function getAdMobManager(): {
+  showFabricationSkipRewarded: () => Promise<boolean>;
+  showOverclockRewarded: () => Promise<boolean>;
+} | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return (
+      require('../../services/AdMobManager') as typeof import('../../services/AdMobManager')
+    ).AdMobManager;
+  } catch {
+    return null;
+  }
+}
+
+function getPurchaseManager(): {
+  purchaseRemoveAds: () => Promise<unknown>;
+  purchaseNanitePackSmall: () => Promise<unknown>;
+  purchaseNanitePackLarge: () => Promise<unknown>;
+} | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return (
+      require('../../services/PurchaseManager') as typeof import('../../services/PurchaseManager')
+    ).PurchaseManager;
+  } catch {
+    return null;
+  }
+}
 
 const COLORS = {
   obsidian: '#0B0E14',
@@ -243,7 +271,7 @@ export function CacheGrid(): React.ReactElement {
             accessibilityRole="button"
             accessibilityLabel="Instant Fabrication Skip rewarded ad"
             onPress={() => {
-              void AdMobManager.showFabricationSkipRewarded();
+              void getAdMobManager()?.showFabricationSkipRewarded();
             }}
             style={styles.rewardBtn}
           >
@@ -260,7 +288,7 @@ export function CacheGrid(): React.ReactElement {
           accessibilityLabel="System Overclock rewarded ad"
           disabled={overclockActive}
           onPress={() => {
-            void AdMobManager.showOverclockRewarded();
+            void getAdMobManager()?.showOverclockRewarded();
           }}
           style={[styles.rewardBtn, overclockActive && styles.upgradeBtnDisabled]}
         >
@@ -288,7 +316,7 @@ export function CacheGrid(): React.ReactElement {
           accessibilityRole="button"
           accessibilityLabel="Remove interstitial ads"
           onPress={() => {
-            void PurchaseManager.purchaseRemoveAds();
+            void getPurchaseManager()?.purchaseRemoveAds();
           }}
           style={styles.iapBtn}
         >
@@ -299,7 +327,7 @@ export function CacheGrid(): React.ReactElement {
             accessibilityRole="button"
             accessibilityLabel="Nanite cache pack small"
             onPress={() => {
-              void PurchaseManager.purchaseNanitePackSmall();
+              void getPurchaseManager()?.purchaseNanitePackSmall();
             }}
             style={[styles.iapBtn, styles.iapHalf]}
           >
@@ -309,7 +337,7 @@ export function CacheGrid(): React.ReactElement {
             accessibilityRole="button"
             accessibilityLabel="Nanite cache pack large"
             onPress={() => {
-              void PurchaseManager.purchaseNanitePackLarge();
+              void getPurchaseManager()?.purchaseNanitePackLarge();
             }}
             style={[styles.iapBtn, styles.iapHalf]}
           >
