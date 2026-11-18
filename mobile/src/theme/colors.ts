@@ -28,8 +28,31 @@ export const COLORS = {
   hull: '#C4D0E0',
   hostile: '#FB7185',
   projectile: '#7DD3FC',
+  /** Legendary+ bolt core — celestial white */
+  celestial: '#F8FAFC',
+  /** Legendary+ trail sheath — soft gold */
+  gold: '#F5D76E',
   /** Dim overlays */
   backdrop: 'rgba(7, 11, 20, 0.88)',
+} as const;
+
+/** Projectile trail palette keyed by equipped weapon rarity band */
+export const TRAIL_COLORS = {
+  /** Common / Uncommon */
+  cyan: {
+    core: COLORS.cyan,
+    glow: COLORS.projectile,
+  },
+  /** Rare / Epic */
+  violet: {
+    core: COLORS.violet,
+    glow: '#C4B5FD',
+  },
+  /** Legendary / Mythic / Celestial */
+  celestial: {
+    core: COLORS.celestial,
+    glow: COLORS.gold,
+  },
 } as const;
 
 export type ThemeColor = keyof typeof COLORS;

@@ -1,6 +1,7 @@
 /**
  * Combat diorama viewport — top 38% of the Sector Sentinel shell.
  * Driven by BattlerEngine (rAF fixed-timestep), not React timers.
+ * Luminous VFX: hit-flash, crit micro-shake, rarity trails, credit arcs.
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -14,12 +15,26 @@ import {
 import {
   battlerEngine,
   type BattlerSnapshot,
+  type CreditPickup,
   type DamageNumber,
   type HostileConstruct,
   type Projectile,
+  type TrailBand,
 } from '../../engine/BattlerEngine';
-import { COLORS, FONTS, RADII } from '../../theme/colors';
+import { COLORS, FONTS, RADII, TRAIL_COLORS } from '../../theme/colors';
 import { TARGETING_PROTOCOL_LABELS } from '../../types/game';
+
+function trailPalette(band: TrailBand): { core: string; glow: string } {
+  switch (band) {
+    case 'VIOLET':
+      return TRAIL_COLORS.violet;
+    case 'CELESTIAL':
+      return TRAIL_COLORS.celestial;
+    case 'CYAN':
+    default:
+      return TRAIL_COLORS.cyan;
+  }
+}
 
 function useBattlerSnapshot(): BattlerSnapshot {
   const [snapshot, setSnapshot] = useState<BattlerSnapshot>(() =>
@@ -154,6 +169,12 @@ function HostileView({
 }): React.ReactElement {
   const pct = Math.max(0, (hostile.hp / hostile.maxHp) * 100);
   const isBoss = hostile.isBoss;
+  const flashing = hostile.hitFlash > 0;
+  const dissolving = hostile.disintegrate > 0;
+  const dissolveOpacity = dissolving
+    ? Math.max(0.12, hostile.disintegrate / 0.42)
+    : 1;
+
   return (
     <View
       style={[
@@ -163,47 +184,91 @@ function HostileView({
           top: hostile.y,
           width: hostile.width,
           height: hostile.height,
+          opacity: dissolveOpacity,
         },
-        isAimTarget && styles.hostileAimed,
+        isAimTarget && !dissolving && styles.hostileAimed,
         isBoss && styles.wardenAimed,
       ]}
     >
       {isBoss ? (
-        <View style={styles.wardenSilhouette}>
+        <View
+          style={[
+            styles.wardenSilhouette,
+            flashing && styles.hitFlashBoss,
+            dissolving && styles.disintegrateFrame,
+          ]}
+        >
           <View style={styles.wardenPauldronLeft} />
           <View style={styles.wardenPauldronRight} />
           <View style={styles.wardenCore} />
           <View style={styles.wardenPlating} />
         </View>
       ) : (
-        <View style={styles.hostileBody} />
-      )}
-      <View
-        style={[
-          styles.hpTrack,
-          isBoss && styles.wardenShieldTrack,
-        ]}
-      >
         <View
           style={[
-            styles.hpFill,
-            { width: `${pct}%`, backgroundColor: COLORS.amber },
-            isBoss && styles.wardenShieldFill,
+            styles.hostileBody,
+            flashing && styles.hitFlashBody,
+            dissolving && styles.disintegrateFrame,
           ]}
         />
-      </View>
+      )}
+      {!dissolving ? (
+        <View
+          style={[
+            styles.hpTrack,
+            isBoss && styles.wardenShieldTrack,
+          ]}
+        >
+          <View
+            style={[
+              styles.hpFill,
+              { width: `${pct}%`, backgroundColor: COLORS.amber },
+              isBoss && styles.wardenShieldFill,
+            ]}
+          />
+        </View>
+      ) : null}
     </View>
   );
 }
 
 function ProjectileView({ shot }: { shot: Projectile }) {
+  const palette = trailPalette(shot.trailBand);
   return (
-    <View
-      style={[
-        styles.projectile,
-        { left: shot.x, top: shot.y - 1 },
-      ]}
-    />
+    <>
+      {shot.trail.map((point, index) => {
+        const t = (index + 1) / Math.max(1, shot.trail.length);
+        return (
+          <View
+            key={`${shot.id}-trail-${index}`}
+            style={[
+              styles.projectileTrail,
+              {
+                left: point.x - 2,
+                top: point.y - 1,
+                width: 4 + t * 6,
+                opacity: 0.18 + t * 0.45,
+                backgroundColor: palette.glow,
+                shadowColor: palette.core,
+              },
+            ]}
+          />
+        );
+      })}
+      <View
+        style={[
+          styles.projectile,
+          {
+            left: shot.x,
+            top: shot.y - 1,
+            backgroundColor: palette.core,
+            shadowColor: palette.glow,
+          },
+          shot.trailBand === 'CELESTIAL' && styles.projectileCelestial,
+          shot.trailBand === 'VIOLET' && styles.projectileViolet,
+        ]}
+      />
+    </>
   );
 }
 
@@ -213,17 +278,36 @@ function DamageNumberView({ dn }: { dn: DamageNumber }) {
     <Text
       style={[
         styles.damageNumber,
+        dn.isCrit && styles.damageNumberCrit,
         { left: dn.x, top: dn.y, opacity },
       ]}
     >
-      {dn.value}
+      {dn.isCrit ? `CRIT ${dn.value}` : dn.value}
+    </Text>
+  );
+}
+
+function CreditPickupView({ pickup }: { pickup: CreditPickup }) {
+  const opacity = Math.max(0, pickup.life / pickup.maxLife);
+  const isGold = pickup.kind === 'GOLD';
+  return (
+    <Text
+      style={[
+        styles.creditPickup,
+        isGold ? styles.creditGold : styles.creditStandard,
+        { left: pickup.x, top: pickup.y, opacity },
+      ]}
+    >
+      {isGold ? `+${pickup.amount} GC` : `+${pickup.amount} STC`}
     </Text>
   );
 }
 
 function TelemetryOverlay({ snapshot }: { snapshot: BattlerSnapshot }) {
   const { telemetry } = snapshot;
-  const wardenActive = snapshot.hostiles.some((h) => h.isBoss);
+  const wardenActive = snapshot.hostiles.some(
+    (h) => h.isBoss && h.disintegrate <= 0,
+  );
   return (
     <View style={styles.overlay}>
       <Text
@@ -266,28 +350,40 @@ export function BattlerViewport(): React.ReactElement {
     battlerEngine.setViewportSize(width, height);
   };
 
+  const shakeStyle = {
+    transform: [
+      { translateX: snapshot.cameraShakeX },
+      { translateY: snapshot.cameraShakeY },
+    ],
+  };
+
   return (
     <View style={styles.root} onLayout={onLayout}>
-      <GridOverlay width={size.width} height={size.height} />
-      <ParallaxBands
-        snapshot={snapshot}
-        width={size.width}
-        height={size.height}
-      />
-      <ExoRigView snapshot={snapshot} />
-      {snapshot.hostiles.map((h) => (
-        <HostileView
-          key={h.id}
-          hostile={h}
-          isAimTarget={snapshot.aimTargetId === h.id}
+      <View style={[styles.shakeLayer, shakeStyle]}>
+        <GridOverlay width={size.width} height={size.height} />
+        <ParallaxBands
+          snapshot={snapshot}
+          width={size.width}
+          height={size.height}
         />
-      ))}
-      {snapshot.projectiles.map((p) => (
-        <ProjectileView key={p.id} shot={p} />
-      ))}
-      {snapshot.damageNumbers.map((dn) => (
-        <DamageNumberView key={dn.id} dn={dn} />
-      ))}
+        <ExoRigView snapshot={snapshot} />
+        {snapshot.hostiles.map((h) => (
+          <HostileView
+            key={h.id}
+            hostile={h}
+            isAimTarget={snapshot.aimTargetId === h.id}
+          />
+        ))}
+        {snapshot.projectiles.map((p) => (
+          <ProjectileView key={p.id} shot={p} />
+        ))}
+        {snapshot.damageNumbers.map((dn) => (
+          <DamageNumberView key={dn.id} dn={dn} />
+        ))}
+        {snapshot.creditPickups.map((c) => (
+          <CreditPickupView key={c.id} pickup={c} />
+        ))}
+      </View>
       <TelemetryOverlay snapshot={snapshot} />
       <View style={styles.frameBorder} pointerEvents="none" />
     </View>
@@ -300,6 +396,9 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.void,
     overflow: 'hidden',
     borderRadius: RADII.sm,
+  },
+  shakeLayer: {
+    ...StyleSheet.absoluteFill,
   },
   frameBorder: {
     ...StyleSheet.absoluteFill,
@@ -367,6 +466,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.hostile,
     borderRadius: RADII.sm,
+  },
+  hitFlashBody: {
+    backgroundColor: COLORS.celestial,
+    borderColor: COLORS.cyan,
+  },
+  hitFlashBoss: {
+    backgroundColor: COLORS.celestial,
+    borderColor: COLORS.gold,
+  },
+  disintegrateFrame: {
+    borderColor: COLORS.violet,
+    opacity: 0.85,
   },
   wardenSilhouette: {
     width: '100%',
@@ -436,6 +547,13 @@ const styles = StyleSheet.create({
   wardenShieldFill: {
     backgroundColor: COLORS.amber,
   },
+  projectileTrail: {
+    position: 'absolute',
+    height: 2,
+    borderRadius: 2,
+    shadowOpacity: 0.45,
+    shadowRadius: 3,
+  },
   projectile: {
     position: 'absolute',
     width: 12,
@@ -446,12 +564,44 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.7,
     shadowRadius: 4,
   },
+  projectileViolet: {
+    shadowOpacity: 0.8,
+    shadowRadius: 5,
+  },
+  projectileCelestial: {
+    height: 3.5,
+    shadowOpacity: 0.9,
+    shadowRadius: 6,
+  },
   damageNumber: {
     position: 'absolute',
     color: COLORS.amber,
     fontFamily: FONTS.mono,
     fontSize: 11,
     fontWeight: '700',
+  },
+  damageNumberCrit: {
+    color: COLORS.celestial,
+    fontSize: 13,
+    textShadowColor: COLORS.gold,
+    textShadowRadius: 4,
+  },
+  creditPickup: {
+    position: 'absolute',
+    fontFamily: FONTS.mono,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+  },
+  creditStandard: {
+    color: COLORS.cyan,
+    textShadowColor: COLORS.teal,
+    textShadowRadius: 3,
+  },
+  creditGold: {
+    color: COLORS.gold,
+    textShadowColor: COLORS.amber,
+    textShadowRadius: 4,
   },
   overlay: {
     position: 'absolute',
