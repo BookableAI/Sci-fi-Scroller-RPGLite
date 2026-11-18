@@ -7,6 +7,10 @@ import { create } from 'zustand';
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
 
 import {
+  OFFLINE_PATROL_MIN_MS,
+  simulateOfflinePatrolYield,
+} from '../engine/combatEconomy';
+import {
   ensureGearAffinity,
   generateGearItem,
   getUpgradeRequirements,
@@ -26,6 +30,7 @@ import {
   type EquippedGear,
   type GearItem,
   type Inventory,
+  type OfflinePatrolReport,
   type PersistedGameSnapshot,
   type Rarity,
   type TargetingProtocol,
@@ -309,13 +314,57 @@ export interface GameStoreState extends PersistedGameSnapshot {
   grantNanitePack: (grant: NanitePackGrant) => void;
   /** Persist combat targeting priority protocol */
   setTargetingProtocol: (protocol: TargetingProtocol) => void;
+  /**
+   * Session-only AUTONOMOUS PATROL REPORT awaiting claim.
+   * Not persisted — recomputed on launch from lastActiveTimestamp.
+   */
+  pendingOfflinePatrol: OfflinePatrolReport | null;
+  /** Stamp lastActiveTimestamp (heartbeat / background). */
+  touchLastActive: () => void;
+  /**
+   * On launch / foreground: if away ≥ 60s, simulate STC+GC from sector kill
+   * rate (elapsed capped 8h) and surface the patrol report modal.
+   */
+  evaluateOfflinePatrol: () => OfflinePatrolReport | null;
+  /**
+   * Claim pending patrol yield at 1× or 2× (rewarded ad), then clear report
+   * and stamp lastActiveTimestamp.
+   */
+  claimOfflinePatrol: (multiplier?: 1 | 2) => boolean;
 }
 
 const initialEquipped: EquippedGear = {};
 
 export const useGameStore = create<GameStoreState>()(
   persist(
-    (set, get) => ({
+    (set, get) => {
+      /**
+       * Stamp lastActiveTimestamp on gameplay state updates.
+       * Skips pure session/UI patches (pendingOfflinePatrol-only) and
+       * explicit lastActiveTimestamp-only heartbeats handled by touchLastActive.
+       */
+      const setActive = (partial: Partial<GameStoreState>): void => {
+        const keys = Object.keys(partial);
+        const onlyPatrol =
+          keys.length === 1 && keys[0] === 'pendingOfflinePatrol';
+        const onlyStamp =
+          keys.length === 1 && keys[0] === 'lastActiveTimestamp';
+        if (onlyPatrol || onlyStamp) {
+          set(partial);
+          return;
+        }
+        // Freeze activity stamp while a patrol report awaits CLAIM.
+        if (get().pendingOfflinePatrol !== null) {
+          set(partial);
+          return;
+        }
+        set({
+          ...partial,
+          lastActiveTimestamp: Date.now(),
+        });
+      };
+
+      return {
       inventory: [] as Inventory,
       equippedGear: initialEquipped,
       standardCredits: 0,
@@ -331,13 +380,80 @@ export const useGameStore = create<GameStoreState>()(
       comparisonQueue: [] as GearItem[],
       overclockExpiresAtMs: null as number | null,
       targetingProtocol: 'CLOSEST' as TargetingProtocol,
+      lastActiveTimestamp: null as number | null,
+      pendingOfflinePatrol: null as OfflinePatrolReport | null,
+
+      touchLastActive: (): void => {
+        // Hold the pre-away stamp until CLAIM so an unclaimed report
+        // can be recomputed after a process kill.
+        if (get().pendingOfflinePatrol !== null) {
+          return;
+        }
+        set({ lastActiveTimestamp: Date.now() });
+      },
+
+      evaluateOfflinePatrol: (): OfflinePatrolReport | null => {
+        const state = get();
+        if (state.pendingOfflinePatrol !== null) {
+          return state.pendingOfflinePatrol;
+        }
+        const last = state.lastActiveTimestamp;
+        if (last === null || last <= 0) {
+          set({ lastActiveTimestamp: Date.now() });
+          return null;
+        }
+        const elapsedMs = Date.now() - last;
+        if (elapsedMs < OFFLINE_PATROL_MIN_MS) {
+          set({ lastActiveTimestamp: Date.now() });
+          return null;
+        }
+        const yieldReport = simulateOfflinePatrolYield({
+          elapsedMs,
+          world: state.currentSectorWorld,
+          level: state.currentSectorLevel,
+          powerRating: computeTotalPowerRating(state.equippedGear),
+        });
+        if (
+          yieldReport.standardCredits <= 0 &&
+          yieldReport.goldCredits <= 0
+        ) {
+          set({ lastActiveTimestamp: Date.now() });
+          return null;
+        }
+        const report: OfflinePatrolReport = {
+          elapsedMs: yieldReport.elapsedMs,
+          estimatedKills: yieldReport.estimatedKills,
+          standardCredits: yieldReport.standardCredits,
+          goldCredits: yieldReport.goldCredits,
+        };
+        // Keep lastActiveTimestamp until claim so relaunch doesn't wipe the yield.
+        set({ pendingOfflinePatrol: report });
+        return report;
+      },
+
+      claimOfflinePatrol: (multiplier: 1 | 2 = 1): boolean => {
+        const state = get();
+        const pending = state.pendingOfflinePatrol;
+        if (!pending) {
+          return false;
+        }
+        const mult = multiplier === 2 ? 2 : 1;
+        setActive({
+          standardCredits:
+            state.standardCredits + pending.standardCredits * mult,
+          goldCredits: state.goldCredits + pending.goldCredits * mult,
+          pendingOfflinePatrol: null,
+          lastActiveTimestamp: Date.now(),
+        });
+        return true;
+      },
 
       setTargetingProtocol: (protocol: TargetingProtocol): void => {
-        set({ targetingProtocol: protocol });
+        setActive({ targetingProtocol: protocol });
       },
 
       setAutoDecryptEnabled: (enabled: boolean): void => {
-        set({ autoDecryptEnabled: enabled });
+        setActive({ autoDecryptEnabled: enabled });
       },
 
       getBatchCapacity: (): number => getBatchCapacity(get().currentSectorWorld),
@@ -355,7 +471,7 @@ export const useGameStore = create<GameStoreState>()(
         const now = Date.now();
         const current = get().overclockExpiresAtMs;
         const base = current !== null && current > now ? current : now;
-        set({ overclockExpiresAtMs: base + ms });
+        setActive({ overclockExpiresAtMs: base + ms });
       },
 
       isOverclockActive: (): boolean => {
@@ -373,7 +489,7 @@ export const useGameStore = create<GameStoreState>()(
 
       grantNanitePack: (grant: NanitePackGrant): void => {
         const state = get();
-        set({
+        setActive({
           cores: state.cores + Math.max(0, Math.floor(grant.cores)),
           goldCredits:
             state.goldCredits + Math.max(0, Math.floor(grant.goldCredits)),
@@ -395,7 +511,7 @@ export const useGameStore = create<GameStoreState>()(
           currentSectorWorld += 1;
         }
 
-        set({
+        setActive({
           standardCredits,
           goldCredits,
           currentSectorLevel,
@@ -411,7 +527,7 @@ export const useGameStore = create<GameStoreState>()(
 
       retreatFromBossDefeat: (): void => {
         const state = get();
-        set({
+        setActive({
           currentSectorLevel: Math.max(1, state.currentSectorLevel - 1),
         });
       },
@@ -434,7 +550,7 @@ export const useGameStore = create<GameStoreState>()(
           item,
         );
 
-        set({
+        setActive({
           goldCredits: state.goldCredits - OPEN_CACHE_GOLD_COST,
           inventory: ingested.inventory,
           standardCredits: ingested.standardCredits,
@@ -457,7 +573,7 @@ export const useGameStore = create<GameStoreState>()(
           ? [...inventoryWithout, previous]
           : inventoryWithout;
 
-        set({
+        setActive({
           inventory: nextInventory,
           equippedGear: {
             ...state.equippedGear,
@@ -482,7 +598,7 @@ export const useGameStore = create<GameStoreState>()(
           delete nextEquipped[item.slot];
         }
 
-        set({
+        setActive({
           standardCredits: state.standardCredits + value,
           inventory: state.inventory.filter((g) => g.id !== item.id),
           equippedGear: nextEquipped,
@@ -507,7 +623,7 @@ export const useGameStore = create<GameStoreState>()(
 
         // Instant fabrication when timer is 0
         if (timerSeconds <= 0) {
-          set({
+          setActive({
             standardCredits: state.standardCredits - costCredits,
             cacheLevel: nextLevel,
             cacheFabrication: null,
@@ -515,7 +631,7 @@ export const useGameStore = create<GameStoreState>()(
           return true;
         }
 
-        set({
+        setActive({
           standardCredits: state.standardCredits - costCredits,
           cacheFabrication: {
             targetLevel: nextLevel,
@@ -532,7 +648,7 @@ export const useGameStore = create<GameStoreState>()(
         if (!job) {
           return;
         }
-        set({
+        setActive({
           cacheLevel: job.targetLevel,
           cacheFabrication: null,
         });
@@ -541,7 +657,7 @@ export const useGameStore = create<GameStoreState>()(
       autoSalvageBelowThreshold: (rarity: Rarity | null): number => {
         const state = get();
         if (rarity === null) {
-          set({ autoSalvageThreshold: null });
+          setActive({ autoSalvageThreshold: null });
           return 0;
         }
 
@@ -570,7 +686,7 @@ export const useGameStore = create<GameStoreState>()(
           comparisonQueue = advanced.comparisonQueue;
         }
 
-        set({
+        setActive({
           inventory: kept,
           standardCredits: state.standardCredits + gained,
           autoSalvageThreshold: rarity,
@@ -590,7 +706,7 @@ export const useGameStore = create<GameStoreState>()(
         const inInventory = state.inventory.some((g) => g.id === pending.id);
         if (!inInventory) {
           const advanced = advanceComparisonQueue(state.comparisonQueue);
-          set({
+          setActive({
             pendingComparisonGear: advanced.pendingComparisonGear,
             comparisonQueue: advanced.comparisonQueue,
           });
@@ -606,7 +722,7 @@ export const useGameStore = create<GameStoreState>()(
         }
 
         const advanced = advanceComparisonQueue(state.comparisonQueue);
-        set({
+        setActive({
           inventory: inventoryWithout,
           standardCredits,
           equippedGear: {
@@ -630,7 +746,7 @@ export const useGameStore = create<GameStoreState>()(
           : 0;
 
         const advanced = advanceComparisonQueue(state.comparisonQueue);
-        set({
+        setActive({
           standardCredits: state.standardCredits + value,
           inventory: state.inventory.filter((g) => g.id !== pending.id),
           pendingComparisonGear: advanced.pendingComparisonGear,
@@ -712,7 +828,7 @@ export const useGameStore = create<GameStoreState>()(
           return;
         }
 
-        set({
+        setActive({
           cacheLevel,
           cacheFabrication,
           goldCredits,
@@ -722,7 +838,8 @@ export const useGameStore = create<GameStoreState>()(
           comparisonQueue,
         });
       },
-    }),
+      };
+    },
     {
       name: 'sector-sentinel-game-v2',
       storage: createJSONStorage(() => mmkvStateStorage),
@@ -742,6 +859,7 @@ export const useGameStore = create<GameStoreState>()(
         comparisonQueue: state.comparisonQueue,
         overclockExpiresAtMs: state.overclockExpiresAtMs,
         targetingProtocol: state.targetingProtocol,
+        lastActiveTimestamp: state.lastActiveTimestamp,
       }),
       merge: (persistedState, currentState): GameStoreState => {
         const raw = (persistedState ?? {}) as Partial<PersistedGameSnapshot> & {
@@ -772,6 +890,8 @@ export const useGameStore = create<GameStoreState>()(
           comparisonQueue: migrateGearCollection(raw.comparisonQueue),
           overclockExpiresAtMs: raw.overclockExpiresAtMs ?? null,
           targetingProtocol: raw.targetingProtocol ?? 'CLOSEST',
+          lastActiveTimestamp: raw.lastActiveTimestamp ?? null,
+          pendingOfflinePatrol: null,
         };
       },
     },

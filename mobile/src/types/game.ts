@@ -187,6 +187,19 @@ export type PersistedGameSnapshot = {
   overclockExpiresAtMs: number | null;
   /** Combat aim priority protocol (persisted) */
   targetingProtocol: TargetingProtocol;
+  /**
+   * Epoch ms of last active gameplay stamp.
+   * Used on launch to simulate autonomous patrol STC/GC (capped 8h).
+   */
+  lastActiveTimestamp: number | null;
+};
+
+/** Pending AUTONOMOUS PATROL REPORT awaiting CLAIM / 2X CLAIM [AD]. */
+export interface OfflinePatrolReport {
+  elapsedMs: number;
+  estimatedKills: number;
+  standardCredits: number;
+  goldCredits: number;
 };
 
 /** Derived loadout telemetry shown in TelemetryPanel */

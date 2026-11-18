@@ -12,7 +12,10 @@ export const PRODUCT_IDS = {
 
 export type ProductId = (typeof PRODUCT_IDS)[keyof typeof PRODUCT_IDS];
 
-export type RewardedAdKind = 'OVERCLOCK' | 'FABRICATION_SKIP';
+export type RewardedAdKind =
+  | 'OVERCLOCK'
+  | 'FABRICATION_SKIP'
+  | 'OFFLINE_PATROL_2X';
 
 /** Duration for System Overclock rewarded grant */
 export const OVERCLOCK_DURATION_MS = 20 * 60 * 1000;
