@@ -37,8 +37,15 @@ function TelemetryPane(): React.ReactElement {
 
 export default function App(): React.ReactElement {
   useEffect(() => {
-    AdMobManager.initialize();
-    void PurchaseManager.configure();
+    // Soft-fail: native AdMob / Purchases are unavailable in Expo Go.
+    try {
+      AdMobManager.initialize();
+    } catch (error) {
+      console.warn('[App] AdMobManager.initialize soft-failed', error);
+    }
+    void PurchaseManager.configure().catch((error) => {
+      console.warn('[App] PurchaseManager.configure soft-failed', error);
+    });
   }, []);
 
   return (

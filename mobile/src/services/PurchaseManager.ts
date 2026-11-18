@@ -1,13 +1,11 @@
 /**
  * RevenueCat purchase handlers — remove ads + Nanite Cache packs.
+ *
+ * Soft-fails in Expo Go / when the native module is unavailable.
+ * RevenueCat is JS-configured (Purchases.configure); it is not an Expo config plugin.
  */
 
 import { Platform } from 'react-native';
-import Purchases, {
-  type CustomerInfo,
-  type PurchasesPackage,
-  PURCHASES_ERROR_CODE,
-} from 'react-native-purchases';
 
 import {
   NANITE_PACK_REWARDS,
@@ -17,12 +15,55 @@ import {
 } from '../types/monetization';
 import { useGameStore } from '../store/useGameStore';
 import { RevenueCatConfig } from './monetizationConfig';
+import { hasCustomNativeModules } from './nativeAvailability';
+
+type PurchasesAPI = typeof import('react-native-purchases').default;
+type CustomerInfo = import('react-native-purchases').CustomerInfo;
+type PurchasesPackage = import('react-native-purchases').PurchasesPackage;
+type PurchasesErrorCode = typeof import('react-native-purchases').PURCHASES_ERROR_CODE;
 
 export type PurchaseResult =
   | { ok: true; customerInfo: CustomerInfo }
   | { ok: false; reason: string; userCancelled?: boolean };
 
+let purchasesApi: PurchasesAPI | null | undefined;
+let purchasesErrorCode: PurchasesErrorCode | null = null;
 let configured = false;
+let unavailableLogged = false;
+
+function loadPurchasesModule(): PurchasesAPI | null {
+  if (purchasesApi !== undefined) {
+    return purchasesApi;
+  }
+  if (!hasCustomNativeModules()) {
+    purchasesApi = null;
+    return purchasesApi;
+  }
+  try {
+    // Native-only; require so Expo Go can boot without the module linked.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require('react-native-purchases') as {
+      default?: PurchasesAPI;
+      PURCHASES_ERROR_CODE?: PurchasesErrorCode;
+    } & PurchasesAPI;
+    purchasesApi = (mod.default ?? mod) as PurchasesAPI;
+    purchasesErrorCode = mod.PURCHASES_ERROR_CODE ?? purchasesApi.PURCHASES_ERROR_CODE ?? null;
+  } catch {
+    purchasesApi = null;
+    purchasesErrorCode = null;
+  }
+  return purchasesApi;
+}
+
+function warnUnavailable(action: string): void {
+  if (!unavailableLogged) {
+    unavailableLogged = true;
+    console.warn(
+      `[PurchaseManager] react-native-purchases unavailable (${action}). ` +
+        'IAP requires a custom Expo dev client / EAS build, not Expo Go.',
+    );
+  }
+}
 
 function apiKeyForPlatform(): string {
   if (Platform.OS === 'ios') {
@@ -39,22 +80,32 @@ export const PurchaseManager = {
     if (configured) {
       return;
     }
-    const apiKey = apiKeyForPlatform();
-    if (!apiKey) {
-      // Keys unset in env — skip native configure so Expo Go / CI still typechecks & boots.
-      return;
+    try {
+      const Purchases = loadPurchasesModule();
+      if (!Purchases) {
+        warnUnavailable('configure');
+        return;
+      }
+      const apiKey = apiKeyForPlatform();
+      if (!apiKey) {
+        // Keys unset in env — skip native configure so Expo Go / CI still typechecks & boots.
+        return;
+      }
+      Purchases.configure({
+        apiKey,
+        appUserID: appUserId,
+      });
+      configured = true;
+    } catch (error) {
+      console.warn('[PurchaseManager] configure soft-failed', error);
     }
-    Purchases.configure({
-      apiKey,
-      appUserID: appUserId,
-    });
-    configured = true;
   },
 
   async getCustomerInfo(): Promise<CustomerInfo | null> {
     try {
       await this.configure();
-      if (!configured) {
+      const Purchases = loadPurchasesModule();
+      if (!Purchases || !configured) {
         return null;
       }
       return await Purchases.getCustomerInfo();
@@ -73,7 +124,8 @@ export const PurchaseManager = {
 
   async getPackageForProduct(productId: ProductId): Promise<PurchasesPackage | null> {
     await this.configure();
-    if (!configured) {
+    const Purchases = loadPurchasesModule();
+    if (!Purchases || !configured) {
       return null;
     }
     const offerings = await Purchases.getOfferings();
@@ -95,8 +147,10 @@ export const PurchaseManager = {
   async purchase(productId: ProductId): Promise<PurchaseResult> {
     try {
       await this.configure();
-      if (!configured) {
-        return { ok: false, reason: 'RevenueCat API key not configured' };
+      const Purchases = loadPurchasesModule();
+      if (!Purchases || !configured) {
+        warnUnavailable('purchase');
+        return { ok: false, reason: 'RevenueCat native module or API key not available' };
       }
       const pkg = await this.getPackageForProduct(productId);
       if (!pkg) {
@@ -106,11 +160,14 @@ export const PurchaseManager = {
       this.applyPurchaseSideEffects(productId, customerInfo);
       return { ok: true, customerInfo };
     } catch (error: unknown) {
+      loadPurchasesModule();
+      const cancelledCode = purchasesErrorCode?.PURCHASE_CANCELLED_ERROR;
       if (
+        cancelledCode !== undefined &&
         typeof error === 'object' &&
         error !== null &&
         'code' in error &&
-        (error as { code: string }).code === PURCHASES_ERROR_CODE.PURCHASE_CANCELLED_ERROR
+        (error as { code: string }).code === cancelledCode
       ) {
         return { ok: false, reason: 'cancelled', userCancelled: true };
       }
@@ -149,8 +206,10 @@ export const PurchaseManager = {
   async restorePurchases(): Promise<PurchaseResult> {
     try {
       await this.configure();
-      if (!configured) {
-        return { ok: false, reason: 'RevenueCat API key not configured' };
+      const Purchases = loadPurchasesModule();
+      if (!Purchases || !configured) {
+        warnUnavailable('restore');
+        return { ok: false, reason: 'RevenueCat native module or API key not available' };
       }
       const customerInfo = await Purchases.restorePurchases();
       return { ok: true, customerInfo };
@@ -159,5 +218,10 @@ export const PurchaseManager = {
         error instanceof Error ? error.message : 'Restore failed';
       return { ok: false, reason: message };
     }
+  },
+
+  /** True when the native Purchases module is linked (dev client / store build). */
+  isNativeAvailable(): boolean {
+    return loadPurchasesModule() !== null;
   },
 } as const;

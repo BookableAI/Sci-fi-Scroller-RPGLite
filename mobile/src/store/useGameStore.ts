@@ -4,7 +4,6 @@
 
 import { create } from 'zustand';
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
-import { MMKV } from 'react-native-mmkv';
 
 import {
   generateGearItem,
@@ -12,6 +11,7 @@ import {
   decryptionTimeForTier,
 } from '../engine/ProbabilityMatrix';
 import { AdMobManager } from '../services/AdMobManager';
+import { hasCustomNativeModules } from '../services/nativeAvailability';
 import {
   OVERCLOCK_SPEED_MULTIPLIER,
 } from '../types/monetization';
@@ -35,20 +35,50 @@ export interface NanitePackGrant {
   fillEmptyCacheSlots: boolean;
 }
 
-const mmkv = new MMKV({ id: 'sector-sentinel-game' });
+/** Prefer MMKV; fall back to in-memory storage so Expo Go can boot without the native module. */
+function createPersistedStorage(): StateStorage {
+  const memoryFallback = (): StateStorage => {
+    console.warn(
+      '[useGameStore] react-native-mmkv unavailable; using in-memory persistence (Expo Go).',
+    );
+    const memory = new Map<string, string>();
+    return {
+      getItem: (name: string): string | null => memory.get(name) ?? null,
+      setItem: (name: string, value: string): void => {
+        memory.set(name, value);
+      },
+      removeItem: (name: string): void => {
+        memory.delete(name);
+      },
+    };
+  };
 
-const mmkvStateStorage: StateStorage = {
-  getItem: (name: string): string | null => {
-    const value = mmkv.getString(name);
-    return value === undefined ? null : value;
-  },
-  setItem: (name: string, value: string): void => {
-    mmkv.set(name, value);
-  },
-  removeItem: (name: string): void => {
-    mmkv.delete(name);
-  },
-};
+  if (!hasCustomNativeModules()) {
+    return memoryFallback();
+  }
+  try {
+    // Native-only; require so Expo Go never evaluates the MMKV binding.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { MMKV } = require('react-native-mmkv') as typeof import('react-native-mmkv');
+    const mmkv = new MMKV({ id: 'sector-sentinel-game' });
+    return {
+      getItem: (name: string): string | null => {
+        const value = mmkv.getString(name);
+        return value === undefined ? null : value;
+      },
+      setItem: (name: string, value: string): void => {
+        mmkv.set(name, value);
+      },
+      removeItem: (name: string): void => {
+        mmkv.delete(name);
+      },
+    };
+  } catch {
+    return memoryFallback();
+  }
+}
+
+const mmkvStateStorage: StateStorage = createPersistedStorage();
 
 let cacheIdCounter = 0;
 
