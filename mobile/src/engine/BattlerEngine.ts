@@ -328,10 +328,12 @@ export class BattlerEngine {
   private projectiles: Projectile[] = [];
   private damageNumbers: DamageNumber[] = [];
   private creditPickups: CreditPickup[] = [];
+  /** Depth stack: stars → far ridges → mid terrain → near plates */
   private parallax: ParallaxLayer[] = [
-    { offset: 0, speed: 12 },
-    { offset: 0, speed: 28 },
-    { offset: 0, speed: 52 },
+    { offset: 0, speed: 8 },
+    { offset: 0, speed: 18 },
+    { offset: 0, speed: 36 },
+    { offset: 0, speed: 58 },
   ];
 
   private viewportWidth = 390;

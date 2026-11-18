@@ -2,9 +2,10 @@
  * Combat diorama viewport — top 38% of the Sector Sentinel shell.
  * Driven by BattlerEngine (rAF fixed-timestep), not React timers.
  * Luminous VFX: hit-flash, crit micro-shake, rarity trails, credit arcs.
+ * Arena: View-only nebula / starfield / terrain parallax (Expo Go safe).
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   LayoutChangeEvent,
   StyleSheet,
@@ -23,6 +24,7 @@ import {
 } from '../../engine/BattlerEngine';
 import { COLORS, FONTS, RADII, TRAIL_COLORS } from '../../theme/colors';
 import { TARGETING_PROTOCOL_LABELS } from '../../types/game';
+import { ArenaBackground } from './ArenaBackground';
 
 function trailPalette(band: TrailBand): { core: string; glow: string } {
   switch (band) {
@@ -51,74 +53,6 @@ function useBattlerSnapshot(): BattlerSnapshot {
   }, []);
 
   return snapshot;
-}
-
-function GridOverlay({ width, height }: { width: number; height: number }) {
-  const lines = useMemo(() => {
-    const vertical: number[] = [];
-    const horizontal: number[] = [];
-    for (let x = 0; x < width; x += 28) vertical.push(x);
-    for (let y = 0; y < height; y += 28) horizontal.push(y);
-    return { vertical, horizontal };
-  }, [width, height]);
-
-  return (
-    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-      {lines.vertical.map((x) => (
-        <View
-          key={`v-${x}`}
-          style={[styles.gridV, { left: x, height }]}
-        />
-      ))}
-      {lines.horizontal.map((y) => (
-        <View
-          key={`h-${y}`}
-          style={[styles.gridH, { top: y, width }]}
-        />
-      ))}
-    </View>
-  );
-}
-
-function ParallaxBands({
-  snapshot,
-  width,
-  height,
-}: {
-  snapshot: BattlerSnapshot;
-  width: number;
-  height: number;
-}) {
-  return (
-    <>
-      {snapshot.parallax.map((layer, index) => {
-        const bandHeight = 10 + index * 6;
-        const top = height * (0.72 + index * 0.05);
-        const shift = -((layer.offset % 48) + 48);
-        return (
-          <View
-            key={`parallax-${index}`}
-            style={[
-              styles.parallaxRow,
-              {
-                top,
-                height: bandHeight,
-                width: width * 2,
-                left: shift,
-                opacity: 0.3 + index * 0.14,
-                borderColor:
-                  index === 2
-                    ? COLORS.teal
-                    : index === 1
-                      ? COLORS.violet
-                      : COLORS.borderGlow,
-              },
-            ]}
-          />
-        );
-      })}
-    </>
-  );
 }
 
 function ExoRigView({ snapshot }: { snapshot: BattlerSnapshot }) {
@@ -360,9 +294,8 @@ export function BattlerViewport(): React.ReactElement {
   return (
     <View style={styles.root} onLayout={onLayout}>
       <View style={[styles.shakeLayer, shakeStyle]}>
-        <GridOverlay width={size.width} height={size.height} />
-        <ParallaxBands
-          snapshot={snapshot}
+        <ArenaBackground
+          parallax={snapshot.parallax}
           width={size.width}
           height={size.height}
         />
@@ -405,25 +338,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.borderGlow,
     borderRadius: RADII.sm,
-  },
-  gridV: {
-    position: 'absolute',
-    top: 0,
-    width: 1,
-    backgroundColor: COLORS.border,
-    opacity: 0.35,
-  },
-  gridH: {
-    position: 'absolute',
-    left: 0,
-    height: 1,
-    backgroundColor: COLORS.border,
-    opacity: 0.35,
-  },
-  parallaxRow: {
-    position: 'absolute',
-    borderTopWidth: 1,
-    borderStyle: 'solid',
   },
   exoRig: {
     position: 'absolute',
