@@ -1,25 +1,23 @@
 /**
- * Equipped loadout matrix + aggregate telemetry diagnostics.
+ * Equipped loadout matrix + aggregate telemetry diagnostics + targeting protocol.
  */
 
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
   computeTelemetryStats,
   useGameStore,
 } from '../../store/useGameStore';
-import { GEAR_SLOTS, type GearItem, type GearSlot } from '../../types/game';
-
-const COLORS = {
-  obsidian: '#0B0E14',
-  panel: '#121721',
-  border: '#1E293B',
-  text: '#F8FAFC',
-  muted: '#64748B',
-  cyan: '#38BDF8',
-  amber: '#F59E0B',
-} as const;
+import { COLORS, FONTS, RADII } from '../../theme/colors';
+import {
+  GEAR_SLOTS,
+  TARGETING_PROTOCOL_LABELS,
+  TARGETING_PROTOCOLS,
+  type GearItem,
+  type GearSlot,
+  type TargetingProtocol,
+} from '../../types/game';
 
 const SLOT_SHORT: Readonly<Record<GearSlot, string>> = {
   WEAPON: 'WPN',
@@ -49,7 +47,7 @@ function LoadoutCell({
           <Text style={styles.cellRarity}>{item.rarity}</Text>
         </>
       ) : (
-        <Text style={styles.cellEmpty}>OFFLINE</Text>
+        <Text style={styles.cellEmpty}>STANDBY</Text>
       )}
     </View>
   );
@@ -58,12 +56,14 @@ function LoadoutCell({
 export function TelemetryPanel(): React.ReactElement {
   const equippedGear = useGameStore((s) => s.equippedGear);
   const cores = useGameStore((s) => s.cores);
+  const targetingProtocol = useGameStore((s) => s.targetingProtocol);
+  const setTargetingProtocol = useGameStore((s) => s.setTargetingProtocol);
   const stats = computeTelemetryStats(equippedGear);
 
   return (
     <View style={styles.root}>
       <View style={styles.headerRow}>
-        <Text style={styles.title}>TELEMETRY / LOADOUT MATRIX</Text>
+        <Text style={styles.title}>TELEMETRY / LOADOUT ARRAY</Text>
         <Text style={styles.cores}>{`SRC ${cores}`}</Text>
       </View>
 
@@ -73,6 +73,20 @@ export function TelemetryPanel(): React.ReactElement {
         ))}
       </View>
 
+      <View style={styles.targetingBlock}>
+        <Text style={styles.targetingLabel}>TARGETING PROTOCOL</Text>
+        <View style={styles.targetingRow}>
+          {TARGETING_PROTOCOLS.map((protocol) => (
+            <TargetingChip
+              key={protocol}
+              protocol={protocol}
+              active={targetingProtocol === protocol}
+              onSelect={setTargetingProtocol}
+            />
+          ))}
+        </View>
+      </View>
+
       <View style={styles.statsBlock}>
         <StatRow label="TOTAL POWER RATING" value={stats.totalPowerRating} accent="cyan" />
         <StatRow label="KINETIC OUTPUT" value={stats.kineticOutput} accent="cyan" />
@@ -80,10 +94,34 @@ export function TelemetryPanel(): React.ReactElement {
         <StatRow
           label="CORE PROCESSING SPEED"
           value={stats.coreProcessingSpeed}
-          accent="cyan"
+          accent="teal"
         />
       </View>
     </View>
+  );
+}
+
+function TargetingChip({
+  protocol,
+  active,
+  onSelect,
+}: {
+  protocol: TargetingProtocol;
+  active: boolean;
+  onSelect: (protocol: TargetingProtocol) => void;
+}): React.ReactElement {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={`Targeting protocol ${TARGETING_PROTOCOL_LABELS[protocol]}`}
+      onPress={() => onSelect(protocol)}
+      style={[styles.chip, active && styles.chipActive]}
+    >
+      <Text style={[styles.chipText, active && styles.chipTextActive]}>
+        {TARGETING_PROTOCOL_LABELS[protocol]}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -94,17 +132,18 @@ function StatRow({
 }: {
   label: string;
   value: number;
-  accent: 'cyan' | 'amber';
+  accent: 'cyan' | 'amber' | 'teal';
 }): React.ReactElement {
+  const valueStyle =
+    accent === 'cyan'
+      ? styles.valueCyan
+      : accent === 'amber'
+        ? styles.valueAmber
+        : styles.valueTeal;
   return (
     <View style={styles.statRow}>
       <Text style={styles.statLabel}>{label}</Text>
-      <Text
-        style={[
-          styles.statValue,
-          accent === 'cyan' ? styles.valueCyan : styles.valueAmber,
-        ]}
-      >
+      <Text style={[styles.statValue, valueStyle]}>
         {value.toLocaleString('en-US')}
       </Text>
     </View>
@@ -117,6 +156,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.panel,
     borderWidth: 1,
     borderColor: COLORS.border,
+    borderRadius: RADII.md,
     padding: 10,
     minHeight: 0,
   },
@@ -128,13 +168,13 @@ const styles = StyleSheet.create({
   },
   title: {
     color: COLORS.cyan,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 11,
     letterSpacing: 1.1,
   },
   cores: {
     color: COLORS.muted,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 10,
   },
   matrix: {
@@ -148,41 +188,81 @@ const styles = StyleSheet.create({
     minHeight: 68,
     borderWidth: 1,
     borderColor: COLORS.border,
-    backgroundColor: COLORS.obsidian,
+    backgroundColor: COLORS.void,
+    borderRadius: RADII.sm,
     padding: 6,
   },
   cellFilled: {
-    borderColor: COLORS.cyan,
+    borderColor: COLORS.teal,
   },
   cellSlot: {
     color: COLORS.muted,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 8,
     letterSpacing: 0.6,
     marginBottom: 2,
   },
   cellName: {
     color: COLORS.text,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 9,
     marginBottom: 2,
   },
   cellPr: {
     color: COLORS.cyan,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 10,
   },
   cellRarity: {
     marginTop: 2,
-    color: COLORS.amber,
-    fontFamily: 'Courier',
+    color: COLORS.violet,
+    fontFamily: FONTS.mono,
     fontSize: 7,
   },
   cellEmpty: {
     marginTop: 10,
     color: COLORS.muted,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 9,
+  },
+  targetingBlock: {
+    marginTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    paddingTop: 8,
+  },
+  targetingLabel: {
+    color: COLORS.cyan,
+    fontFamily: FONTS.mono,
+    fontSize: 10,
+    letterSpacing: 1,
+    marginBottom: 6,
+  },
+  targetingRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  chip: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.void,
+    borderRadius: RADII.sm,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+  chipActive: {
+    borderColor: COLORS.cyan,
+    backgroundColor: COLORS.panelElevated,
+  },
+  chipText: {
+    color: COLORS.muted,
+    fontFamily: FONTS.mono,
+    fontSize: 8,
+    letterSpacing: 0.4,
+  },
+  chipTextActive: {
+    color: COLORS.cyan,
   },
   statsBlock: {
     marginTop: 10,
@@ -198,12 +278,12 @@ const styles = StyleSheet.create({
   },
   statLabel: {
     color: COLORS.muted,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 9,
     letterSpacing: 0.5,
   },
   statValue: {
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 13,
   },
   valueCyan: {
@@ -211,5 +291,8 @@ const styles = StyleSheet.create({
   },
   valueAmber: {
     color: COLORS.amber,
+  },
+  valueTeal: {
+    color: COLORS.teal,
   },
 });

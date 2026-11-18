@@ -4,9 +4,16 @@
  */
 
 import { useGameStore } from '../store/useGameStore';
+import type { TargetingProtocol } from '../types/game';
 
 export const TARGET_FPS = 60;
 export const FIXED_DT = 1 / TARGET_FPS;
+
+/** Projectile AABB used for collision (matches rendered bolt size + padding) */
+const PROJECTILE_HIT_W = 14;
+const PROJECTILE_HIT_H = 10;
+/** Soft aim pad so bolts still connect when Y drifts slightly */
+const HIT_PAD = 6;
 
 export interface Vec2 {
   x: number;
@@ -35,6 +42,8 @@ export interface HostileConstruct {
   maxHp: number;
   defense: number;
   speed: number;
+  /** Inherent threat rating — used by STRONGEST / WEAKEST protocols */
+  powerRating: number;
 }
 
 export interface Projectile {
@@ -46,6 +55,8 @@ export interface Projectile {
   damage: number;
   fromPlayer: boolean;
   life: number;
+  /** Locked aim target id; homing while alive */
+  targetId: number | null;
 }
 
 export interface DamageNumber {
@@ -69,6 +80,7 @@ export interface CombatTelemetry {
   shieldIntegrity: number;
   targetDistance: number;
   totalPowerRating: number;
+  targetingProtocol: TargetingProtocol;
 }
 
 export interface BattlerSnapshot {
@@ -80,6 +92,7 @@ export interface BattlerSnapshot {
   telemetry: CombatTelemetry;
   scrollX: number;
   running: boolean;
+  aimTargetId: number | null;
 }
 
 export type BattlerListener = (snapshot: BattlerSnapshot) => void;
@@ -94,12 +107,16 @@ function enemyStats(world: number, level: number): {
   hp: number;
   defense: number;
   speed: number;
+  powerRating: number;
 } {
   const tier = (world - 1) * 10 + level;
+  const hp = Math.round(80 + tier * 28 + world * 40);
+  const defense = Math.round(4 + tier * 1.8 + world * 3);
   return {
-    hp: Math.round(80 + tier * 28 + world * 40),
-    defense: Math.round(4 + tier * 1.8 + world * 3),
+    hp,
+    defense,
     speed: 38 + Math.min(40, tier * 1.2),
+    powerRating: Math.round(hp * 0.35 + defense * 4 + tier * 6),
   };
 }
 
@@ -111,6 +128,69 @@ function salvageCreditsForKill(world: number, level: number, pr: number): number
 /** ~40% chance a defeated construct drops a Supply Cache */
 function rollSupplyCacheDrop(rng: () => number = Math.random): boolean {
   return rng() < 0.4;
+}
+
+function distanceToHostile(exo: ExoRigState, hostile: HostileConstruct): number {
+  const ax = exo.x + exo.width * 0.5;
+  const ay = exo.y + exo.height * 0.5;
+  const bx = hostile.x + hostile.width * 0.5;
+  const by = hostile.y + hostile.height * 0.5;
+  const dx = bx - ax;
+  const dy = by - ay;
+  return Math.hypot(dx, dy);
+}
+
+/**
+ * Pick the current aim target from live hostiles using the persisted protocol.
+ * Strength uses construct powerRating (HP-scaled threat); distance uses exo→hostile.
+ */
+export function selectAimTarget(
+  hostiles: readonly HostileConstruct[],
+  exo: ExoRigState,
+  protocol: TargetingProtocol,
+): HostileConstruct | null {
+  if (hostiles.length === 0) {
+    return null;
+  }
+  if (hostiles.length === 1) {
+    return hostiles[0];
+  }
+
+  let best = hostiles[0];
+  let bestScore = scoreHostile(best, exo, protocol);
+
+  for (let i = 1; i < hostiles.length; i += 1) {
+    const h = hostiles[i];
+    const score = scoreHostile(h, exo, protocol);
+    const better =
+      protocol === 'CLOSEST' || protocol === 'WEAKEST'
+        ? score < bestScore
+        : score > bestScore;
+    if (better) {
+      best = h;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+function scoreHostile(
+  hostile: HostileConstruct,
+  exo: ExoRigState,
+  protocol: TargetingProtocol,
+): number {
+  switch (protocol) {
+    case 'CLOSEST':
+      return distanceToHostile(exo, hostile);
+    case 'FURTHEST':
+      return distanceToHostile(exo, hostile);
+    case 'STRONGEST':
+      return hostile.powerRating;
+    case 'WEAKEST':
+      return hostile.hp;
+    default:
+      return distanceToHostile(exo, hostile);
+  }
 }
 
 export class BattlerEngine {
@@ -152,7 +232,16 @@ export class BattlerEngine {
   setViewportSize(width: number, height: number): void {
     this.viewportWidth = Math.max(1, width);
     this.viewportHeight = Math.max(1, height);
-    this.exoRig.y = height * 0.55;
+    this.exoRig.y = this.laneY(this.exoRig.height);
+    // Keep live constructs on the same engagement lane after layout
+    for (const hostile of this.hostiles) {
+      hostile.y = this.laneY(hostile.height);
+    }
+  }
+
+  /** Shared vertical lane so exo-rig, hostiles, and bolts share Y space */
+  private laneY(entityHeight: number): number {
+    return this.viewportHeight * 0.52 - entityHeight * 0.15;
   }
 
   subscribe(listener: BattlerListener): () => void {
@@ -165,7 +254,8 @@ export class BattlerEngine {
 
   getSnapshot(): BattlerSnapshot {
     const store = useGameStore.getState();
-    const target = this.hostiles[0];
+    const protocol = store.targetingProtocol;
+    const target = selectAimTarget(this.hostiles, this.exoRig, protocol);
     const targetDistance = target
       ? Math.max(0, target.x - (this.exoRig.x + this.exoRig.width))
       : 0;
@@ -183,9 +273,11 @@ export class BattlerEngine {
         shieldIntegrity: Math.round(this.exoRig.shieldFraction * 100),
         targetDistance: Math.round(targetDistance),
         totalPowerRating: store.getTotalPowerRating(),
+        targetingProtocol: protocol,
       },
       scrollX: this.scrollX,
       running: this.running,
+      aimTargetId: target?.id ?? null,
     };
   }
 
@@ -278,17 +370,18 @@ export class BattlerEngine {
   private spawnHostile(): void {
     const store = useGameStore.getState();
     const stats = enemyStats(store.currentSectorWorld, store.currentSectorLevel);
-    const y = this.viewportHeight * 0.52;
+    const height = 42;
     this.hostiles.push({
       id: nextEntityId(),
       x: this.viewportWidth + 40,
-      y,
+      y: this.laneY(height),
       width: 34,
-      height: 42,
+      height,
       hp: stats.hp,
       maxHp: stats.hp,
       defense: stats.defense,
       speed: stats.speed,
+      powerRating: stats.powerRating,
     });
   }
 
@@ -314,7 +407,8 @@ export class BattlerEngine {
 
   private updatePlayerFire(dt: number, powerRating: number): void {
     this.fireCooldown -= dt;
-    const target = this.hostiles[0];
+    const protocol = useGameStore.getState().targetingProtocol;
+    const target = selectAimTarget(this.hostiles, this.exoRig, protocol);
     if (!target || this.fireCooldown > 0) {
       return;
     }
@@ -323,32 +417,62 @@ export class BattlerEngine {
     this.fireCooldown = 1 / fireRate;
     const damage = Math.max(6, powerRating * 0.22);
 
+    const originX = this.exoRig.x + this.exoRig.width;
+    const originY = this.exoRig.y + this.exoRig.height * 0.4;
+    const aimX = target.x + target.width * 0.35;
+    const aimY = target.y + target.height * 0.45;
+    const dx = aimX - originX;
+    const dy = aimY - originY;
+    const dist = Math.max(1, Math.hypot(dx, dy));
+    const speed = 320 + powerRating * 0.15;
+
     this.projectiles.push({
       id: nextEntityId(),
-      x: this.exoRig.x + this.exoRig.width,
-      y: this.exoRig.y + this.exoRig.height * 0.35,
-      vx: 320 + powerRating * 0.15,
-      vy: 0,
+      x: originX,
+      y: originY,
+      vx: (dx / dist) * speed,
+      vy: (dy / dist) * speed,
       damage,
       fromPlayer: true,
       life: 2.5,
+      targetId: target.id,
     });
   }
 
   private updateProjectiles(dt: number, powerRating: number): void {
     const remaining: Projectile[] = [];
+    const boltSpeed = 320 + powerRating * 0.15;
 
     for (const shot of this.projectiles) {
+      if (shot.fromPlayer && shot.targetId !== null) {
+        const locked = this.hostiles.find((h) => h.id === shot.targetId);
+        if (locked) {
+          // Homing correction so bolts stay on the selected protocol target
+          const aimX = locked.x + locked.width * 0.35;
+          const aimY = locked.y + locked.height * 0.45;
+          const dx = aimX - shot.x;
+          const dy = aimY - shot.y;
+          const dist = Math.max(1, Math.hypot(dx, dy));
+          const desiredVx = (dx / dist) * boltSpeed;
+          const desiredVy = (dy / dist) * boltSpeed;
+          const turn = Math.min(1, 10 * dt);
+          shot.vx += (desiredVx - shot.vx) * turn;
+          shot.vy += (desiredVy - shot.vy) * turn;
+        }
+      }
+
       shot.x += shot.vx * dt;
       shot.y += shot.vy * dt;
       shot.life -= dt;
-      if (shot.life <= 0 || shot.x > this.viewportWidth + 80) {
+      if (shot.life <= 0 || shot.x > this.viewportWidth + 80 || shot.x < -40) {
         continue;
       }
 
       if (shot.fromPlayer) {
         let consumed = false;
-        for (const hostile of this.hostiles) {
+        // Prefer locked target first so protocol selection lands reliably
+        const ordered = this.orderHostilesForShot(shot);
+        for (const hostile of ordered) {
           if (this.hitsHostile(shot, hostile)) {
             const mitigated = Math.max(1, shot.damage - hostile.defense * 0.45);
             hostile.hp -= mitigated;
@@ -373,12 +497,31 @@ export class BattlerEngine {
     this.hostiles = this.hostiles.filter((h) => h.hp > 0);
   }
 
+  private orderHostilesForShot(shot: Projectile): HostileConstruct[] {
+    if (shot.targetId === null) {
+      return this.hostiles;
+    }
+    const locked = this.hostiles.filter((h) => h.id === shot.targetId);
+    const others = this.hostiles.filter((h) => h.id !== shot.targetId);
+    return [...locked, ...others];
+  }
+
   private hitsHostile(shot: Projectile, hostile: HostileConstruct): boolean {
+    const shotLeft = shot.x - HIT_PAD;
+    const shotRight = shot.x + PROJECTILE_HIT_W + HIT_PAD;
+    const shotTop = shot.y - PROJECTILE_HIT_H * 0.5 - HIT_PAD;
+    const shotBottom = shot.y + PROJECTILE_HIT_H * 0.5 + HIT_PAD;
+
+    const hostLeft = hostile.x;
+    const hostRight = hostile.x + hostile.width;
+    const hostTop = hostile.y;
+    const hostBottom = hostile.y + hostile.height;
+
     return (
-      shot.x >= hostile.x &&
-      shot.x <= hostile.x + hostile.width &&
-      shot.y >= hostile.y &&
-      shot.y <= hostile.y + hostile.height
+      shotLeft <= hostRight &&
+      shotRight >= hostLeft &&
+      shotTop <= hostBottom &&
+      shotBottom >= hostTop
     );
   }
 

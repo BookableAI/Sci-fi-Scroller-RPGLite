@@ -28,6 +28,7 @@ import {
   type PersistedGameSnapshot,
   type Rarity,
   type SupplyCache,
+  type TargetingProtocol,
   type TelemetryStats,
 } from '../types/game';
 
@@ -232,6 +233,8 @@ export interface GameStoreState extends PersistedGameSnapshot {
   getCombatSpeedMultiplier: () => number;
   /** Apply RevenueCat Nanite Cache pack contents */
   grantNanitePack: (grant: NanitePackGrant) => void;
+  /** Persist combat targeting priority protocol */
+  setTargetingProtocol: (protocol: TargetingProtocol) => void;
 }
 
 const initialEquipped: EquippedGear = {};
@@ -253,6 +256,11 @@ export const useGameStore = create<GameStoreState>()(
       pendingComparisonGear: null as GearItem | null,
       comparisonQueue: [] as GearItem[],
       overclockExpiresAtMs: null as number | null,
+      targetingProtocol: 'CLOSEST' as TargetingProtocol,
+
+      setTargetingProtocol: (protocol: TargetingProtocol): void => {
+        set({ targetingProtocol: protocol });
+      },
 
       getBatchCapacity: (): number => getBatchCapacity(get().currentSectorWorld),
 
@@ -721,6 +729,7 @@ export const useGameStore = create<GameStoreState>()(
         pendingComparisonGear: state.pendingComparisonGear,
         comparisonQueue: state.comparisonQueue,
         overclockExpiresAtMs: state.overclockExpiresAtMs,
+        targetingProtocol: state.targetingProtocol,
       }),
       merge: (persistedState, currentState): GameStoreState => {
         const persisted = (persistedState ?? {}) as Partial<PersistedGameSnapshot>;
@@ -731,6 +740,7 @@ export const useGameStore = create<GameStoreState>()(
           pendingComparisonGear: persisted.pendingComparisonGear ?? null,
           comparisonQueue: persisted.comparisonQueue ?? [],
           overclockExpiresAtMs: persisted.overclockExpiresAtMs ?? null,
+          targetingProtocol: persisted.targetingProtocol ?? 'CLOSEST',
         };
       },
     },

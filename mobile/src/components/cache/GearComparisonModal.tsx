@@ -13,17 +13,8 @@ import {
 } from 'react-native';
 
 import { useGameStore } from '../../store/useGameStore';
+import { COLORS, FONTS, RADII } from '../../theme/colors';
 import type { GearItem } from '../../types/game';
-
-const COLORS = {
-  obsidian: '#0B0E14',
-  panel: '#121721',
-  border: '#1E293B',
-  text: '#F8FAFC',
-  muted: '#64748B',
-  cyan: '#38BDF8',
-  amber: '#F59E0B',
-} as const;
 
 const SLOT_LABEL: Readonly<Record<GearItem['slot'], string>> = {
   WEAPON: 'PRIMARY WEAPON',
@@ -157,32 +148,33 @@ export function GearComparisonModal(): React.ReactElement | null {
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(11, 14, 20, 0.86)',
+    backgroundColor: COLORS.backdrop,
     justifyContent: 'center',
     paddingHorizontal: 16,
   },
   sheet: {
     backgroundColor: COLORS.panel,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: COLORS.borderGlow,
+    borderRadius: RADII.lg,
     padding: 14,
   },
   header: {
     color: COLORS.cyan,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 13,
     letterSpacing: 1.2,
   },
   slotLine: {
     marginTop: 4,
     color: COLORS.muted,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 10,
   },
   queueNote: {
     marginTop: 2,
     color: COLORS.amber,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 9,
   },
   compareRow: {
@@ -199,38 +191,38 @@ const styles = StyleSheet.create({
   },
   columnTitle: {
     color: COLORS.muted,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 9,
     letterSpacing: 0.8,
     marginBottom: 6,
   },
   empty: {
     color: COLORS.muted,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 11,
   },
   itemName: {
     color: COLORS.text,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 12,
     marginBottom: 4,
   },
   meta: {
-    color: COLORS.amber,
-    fontFamily: 'Courier',
+    color: COLORS.violet,
+    fontFamily: FONTS.mono,
     fontSize: 10,
     marginBottom: 6,
   },
   stat: {
     color: COLORS.text,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 11,
     marginBottom: 2,
   },
   salvage: {
     marginTop: 6,
     color: COLORS.muted,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 9,
   },
   deltaRow: {
@@ -238,6 +230,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderWidth: 1,
     borderColor: COLORS.border,
+    borderRadius: RADII.sm,
+    backgroundColor: COLORS.void,
     paddingVertical: 8,
     paddingHorizontal: 10,
     flexDirection: 'row',
@@ -246,12 +240,12 @@ const styles = StyleSheet.create({
   },
   deltaLabel: {
     color: COLORS.muted,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 9,
     letterSpacing: 0.6,
   },
   deltaValue: {
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 16,
     letterSpacing: 0.5,
   },
@@ -264,25 +258,27 @@ const styles = StyleSheet.create({
   primaryBtn: {
     borderWidth: 1,
     borderColor: COLORS.cyan,
+    borderRadius: RADII.sm,
     paddingVertical: 10,
     alignItems: 'center',
     marginBottom: 8,
   },
   primaryBtnText: {
     color: COLORS.cyan,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 11,
     letterSpacing: 0.8,
   },
   secondaryBtn: {
     borderWidth: 1,
     borderColor: COLORS.amber,
+    borderRadius: RADII.sm,
     paddingVertical: 10,
     alignItems: 'center',
   },
   secondaryBtnText: {
     color: COLORS.amber,
-    fontFamily: 'Courier',
+    fontFamily: FONTS.mono,
     fontSize: 11,
     letterSpacing: 0.8,
   },
