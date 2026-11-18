@@ -11,13 +11,38 @@ import {
 } from '../../store/useGameStore';
 import { COLORS, FONTS, RADII } from '../../theme/colors';
 import {
+  AFFINITY_BADGE,
+  computeAffinityCombatBonuses,
   GEAR_SLOTS,
   TARGETING_PROTOCOL_LABELS,
   TARGETING_PROTOCOLS,
+  type AffinityResonanceStatus,
   type GearItem,
   type GearSlot,
+  type ManufacturerAffinity,
   type TargetingProtocol,
 } from '../../types/game';
+
+function AffinityBadge({
+  affinity,
+  compact = false,
+}: {
+  affinity: ManufacturerAffinity;
+  compact?: boolean;
+}): React.ReactElement {
+  return (
+    <View style={[styles.affinityBadge, compact && styles.affinityBadgeCompact]}>
+      <Text
+        style={[
+          styles.affinityBadgeText,
+          compact && styles.affinityBadgeTextCompact,
+        ]}
+      >
+        {AFFINITY_BADGE[affinity]}
+      </Text>
+    </View>
+  );
+}
 
 const SLOT_SHORT: Readonly<Record<GearSlot, string>> = {
   WEAPON: 'WPN',
@@ -44,7 +69,10 @@ function LoadoutCell({
             {item.name}
           </Text>
           <Text style={styles.cellPr}>{`PR ${item.powerRating}`}</Text>
-          <Text style={styles.cellRarity}>{item.rarity}</Text>
+          <View style={styles.cellMetaRow}>
+            <Text style={styles.cellRarity}>{item.rarity}</Text>
+            <AffinityBadge affinity={item.affinity} compact />
+          </View>
         </>
       ) : (
         <Text style={styles.cellEmpty}>STANDBY</Text>
@@ -59,6 +87,7 @@ export function TelemetryPanel(): React.ReactElement {
   const targetingProtocol = useGameStore((s) => s.targetingProtocol);
   const setTargetingProtocol = useGameStore((s) => s.setTargetingProtocol);
   const stats = computeTelemetryStats(equippedGear);
+  const affinityBonuses = computeAffinityCombatBonuses(equippedGear);
 
   return (
     <View style={styles.root}>
@@ -70,6 +99,13 @@ export function TelemetryPanel(): React.ReactElement {
       <View style={styles.matrix}>
         {GEAR_SLOTS.map((slot) => (
           <LoadoutCell key={slot} slot={slot} item={equippedGear[slot]} />
+        ))}
+      </View>
+
+      <View style={styles.resonanceBlock}>
+        <Text style={styles.targetingLabel}>AFFINITY RESONANCE</Text>
+        {affinityBonuses.resonance.map((status) => (
+          <ResonanceRow key={status.affinity} status={status} />
         ))}
       </View>
 
@@ -96,6 +132,47 @@ export function TelemetryPanel(): React.ReactElement {
           value={stats.coreProcessingSpeed}
           accent="teal"
         />
+      </View>
+    </View>
+  );
+}
+
+function ResonanceRow({
+  status,
+}: {
+  status: AffinityResonanceStatus;
+}): React.ReactElement {
+  const tierLabel =
+    status.tier === 0 ? 'TIER —' : `TIER-${status.tier}`;
+  return (
+    <View style={styles.resonanceRow}>
+      <View style={styles.resonanceLeft}>
+        <AffinityBadge affinity={status.affinity} />
+        <View style={styles.resonanceTextCol}>
+          <Text style={styles.resonanceName} numberOfLines={1}>
+            {status.affinity}
+          </Text>
+          <Text
+            style={[
+              styles.resonanceBonus,
+              status.active ? styles.resonanceBonusActive : null,
+            ]}
+            numberOfLines={1}
+          >
+            {status.active ? status.bonusLabel : 'NO SET LINK'}
+          </Text>
+        </View>
+      </View>
+      <View style={styles.resonanceRight}>
+        <Text style={styles.resonancePieces}>{`${status.pieces}/6`}</Text>
+        <Text
+          style={[
+            styles.resonanceTier,
+            status.active ? styles.resonanceTierActive : null,
+          ]}
+        >
+          {tierLabel}
+        </Text>
       </View>
     </View>
   );
@@ -213,10 +290,36 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.mono,
     fontSize: 10,
   },
-  cellRarity: {
+  cellMetaRow: {
     marginTop: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 4,
+  },
+  cellRarity: {
     color: COLORS.violet,
     fontFamily: FONTS.mono,
+    fontSize: 7,
+  },
+  affinityBadge: {
+    borderWidth: 1,
+    borderColor: COLORS.teal,
+    borderRadius: RADII.sm,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  affinityBadgeCompact: {
+    paddingHorizontal: 3,
+    paddingVertical: 0,
+  },
+  affinityBadgeText: {
+    color: COLORS.teal,
+    fontFamily: FONTS.mono,
+    fontSize: 8,
+    letterSpacing: 0.5,
+  },
+  affinityBadgeTextCompact: {
     fontSize: 7,
   },
   cellEmpty: {
@@ -224,6 +327,62 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
     fontFamily: FONTS.mono,
     fontSize: 9,
+  },
+  resonanceBlock: {
+    marginTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    paddingTop: 8,
+    gap: 6,
+  },
+  resonanceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  resonanceLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minWidth: 0,
+  },
+  resonanceTextCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  resonanceName: {
+    color: COLORS.text,
+    fontFamily: FONTS.mono,
+    fontSize: 8,
+    letterSpacing: 0.3,
+  },
+  resonanceBonus: {
+    color: COLORS.muted,
+    fontFamily: FONTS.mono,
+    fontSize: 7,
+    letterSpacing: 0.3,
+  },
+  resonanceBonusActive: {
+    color: COLORS.cyan,
+  },
+  resonanceRight: {
+    alignItems: 'flex-end',
+  },
+  resonancePieces: {
+    color: COLORS.muted,
+    fontFamily: FONTS.mono,
+    fontSize: 8,
+  },
+  resonanceTier: {
+    color: COLORS.muted,
+    fontFamily: FONTS.mono,
+    fontSize: 9,
+    letterSpacing: 0.5,
+  },
+  resonanceTierActive: {
+    color: COLORS.teal,
   },
   targetingBlock: {
     marginTop: 10,

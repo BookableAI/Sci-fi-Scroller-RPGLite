@@ -4,8 +4,10 @@
 
 import {
   GEAR_SLOTS,
+  MANUFACTURER_AFFINITIES,
   type GearItem,
   type GearSlot,
+  type ManufacturerAffinity,
   type Rarity,
   RARITIES,
 } from '../types/game';
@@ -353,6 +355,38 @@ function pickName(slot: GearSlot, rng: Rng): string {
   return pool[Math.min(index, pool.length - 1)];
 }
 
+/** Uniform manufacturer affinity roll across AETHER-DYNAMICS / KINETIC-FORGE / VOID-SYNTH. */
+export function sampleManufacturerAffinity(
+  rng: Rng = Math.random,
+): ManufacturerAffinity {
+  const index = Math.floor(rng() * MANUFACTURER_AFFINITIES.length);
+  return MANUFACTURER_AFFINITIES[
+    Math.min(index, MANUFACTURER_AFFINITIES.length - 1)
+  ];
+}
+
+/**
+ * Backfill manufacturer affinity on legacy persisted gear (pre-affinity saves).
+ * Deterministic from gear id so reloads stay stable.
+ */
+export function ensureGearAffinity(
+  item: Omit<GearItem, 'affinity'> & { affinity?: unknown },
+): GearItem {
+  if (
+    typeof item.affinity === 'string' &&
+    (MANUFACTURER_AFFINITIES as readonly string[]).includes(item.affinity)
+  ) {
+    return item as GearItem;
+  }
+  let hash = 0;
+  for (let i = 0; i < item.id.length; i += 1) {
+    hash = (hash * 31 + item.id.charCodeAt(i)) >>> 0;
+  }
+  const affinity =
+    MANUFACTURER_AFFINITIES[hash % MANUFACTURER_AFFINITIES.length];
+  return { ...item, affinity };
+}
+
 function rollStat(
   base: number,
   spread: number,
@@ -386,7 +420,8 @@ function salvageValueFor(
 }
 
 /**
- * Sample §2.5 matrix for `cacheLevel`, roll stats, compute PR, assign sci-fi name.
+ * Sample §2.5 matrix for `cacheLevel`, roll stats, compute PR, assign sci-fi name
+ * + manufacturer affinity (AETHER-DYNAMICS / KINETIC-FORGE / VOID-SYNTH).
  */
 export function generateGearItem(
   cacheLevel: number,
@@ -397,6 +432,7 @@ export function generateGearItem(
   const rarityMult = RARITY_MULTIPLIER[rarity];
   const slot = pickSlot(rng);
   const name = pickName(slot, rng);
+  const affinity = sampleManufacturerAffinity(rng);
 
   const primaryStat = rollStat(8, 12, rarityMult, cacheLevel, rng);
   const secondaryStat = rollStat(4, 8, rarityMult * 0.75, cacheLevel, rng);
@@ -412,6 +448,7 @@ export function generateGearItem(
     primaryStat,
     secondaryStat,
     salvageValue,
+    affinity,
   };
 }
 
