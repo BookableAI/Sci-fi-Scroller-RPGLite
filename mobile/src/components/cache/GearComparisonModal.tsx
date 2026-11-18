@@ -1,9 +1,9 @@
 /**
  * Gear comparison modal — cache yield vs equipped slot.
- * Infographic: Power Rating + primary/secondary deltas (cyan ↑ / amber ↓).
+ * Precedes with 0.6s Relic Decryption; holographic rarity frames on columns.
  */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -14,11 +14,14 @@ import {
 
 import { useGameStore } from '../../store/useGameStore';
 import { COLORS, FONTS, RADII } from '../../theme/colors';
+import { rarityVisual } from '../../theme/rarityVisuals';
 import {
   AFFINITY_BADGE,
   type GearItem,
   type ManufacturerAffinity,
 } from '../../types/game';
+import { HoloRarityFrame } from '../ui/HoloRarityFrame';
+import { RelicDecryptionSequence } from './RelicDecryptionSequence';
 
 function AffinityBadge({
   affinity,
@@ -70,28 +73,38 @@ function GearColumn({
   item: GearItem | undefined;
   emptyLabel: string;
 }): React.ReactElement {
+  const body = !item ? (
+    <Text style={styles.empty}>{emptyLabel}</Text>
+  ) : (
+    <>
+      <Text style={styles.itemName} numberOfLines={2}>
+        {item.name}
+      </Text>
+      <View style={styles.metaRow}>
+        <Text style={[styles.meta, { color: rarityVisual(item.rarity).core }]}>
+          {item.rarity}
+        </Text>
+        <AffinityBadge affinity={item.affinity} />
+      </View>
+      <Text style={styles.affinityFull} numberOfLines={1}>
+        {item.affinity}
+      </Text>
+      <Text style={styles.stat}>{`PR  ${item.powerRating}`}</Text>
+      <Text style={styles.stat}>{`PRI ${item.primaryStat}`}</Text>
+      <Text style={styles.stat}>{`SEC ${item.secondaryStat}`}</Text>
+      <Text style={styles.salvage}>{`SALVAGE ${item.salvageValue} STC`}</Text>
+    </>
+  );
+
   return (
     <View style={styles.column}>
       <Text style={styles.columnTitle}>{title}</Text>
-      {!item ? (
-        <Text style={styles.empty}>{emptyLabel}</Text>
+      {item ? (
+        <HoloRarityFrame rarity={item.rarity} style={styles.holoColumn}>
+          <View style={styles.holoInner}>{body}</View>
+        </HoloRarityFrame>
       ) : (
-        <>
-          <Text style={styles.itemName} numberOfLines={2}>
-            {item.name}
-          </Text>
-          <View style={styles.metaRow}>
-            <Text style={styles.meta}>{item.rarity}</Text>
-            <AffinityBadge affinity={item.affinity} />
-          </View>
-          <Text style={styles.affinityFull} numberOfLines={1}>
-            {item.affinity}
-          </Text>
-          <Text style={styles.stat}>{`PR  ${item.powerRating}`}</Text>
-          <Text style={styles.stat}>{`PRI ${item.primaryStat}`}</Text>
-          <Text style={styles.stat}>{`SEC ${item.secondaryStat}`}</Text>
-          <Text style={styles.salvage}>{`SALVAGE ${item.salvageValue} STC`}</Text>
-        </>
+        body
       )}
     </View>
   );
@@ -156,9 +169,27 @@ export function GearComparisonModal(): React.ReactElement | null {
   const queueLen = useGameStore((s) => s.comparisonQueue.length);
   const resolveComparisonEquip = useGameStore((s) => s.resolveComparisonEquip);
   const resolveComparisonSalvage = useGameStore((s) => s.resolveComparisonSalvage);
+  const [revealedId, setRevealedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!pending) {
+      setRevealedId(null);
+    }
+  }, [pending]);
 
   if (!pending) {
     return null;
+  }
+
+  const decrypting = revealedId !== pending.id;
+
+  if (decrypting) {
+    return (
+      <RelicDecryptionSequence
+        item={pending}
+        onComplete={() => setRevealedId(pending.id)}
+      />
+    );
   }
 
   const equipped = equippedGear[pending.slot];
@@ -177,6 +208,7 @@ export function GearComparisonModal(): React.ReactElement | null {
         : verdictTone === 'down'
           ? 'POWER DOWN · CONSIDER SALVAGE'
           : 'EVEN POWER · JUDGE BY STATS';
+  const pendingVisual = rarityVisual(pending.rarity);
 
   return (
     <Modal
@@ -189,8 +221,15 @@ export function GearComparisonModal(): React.ReactElement | null {
       }}
     >
       <View style={styles.backdrop}>
-        <View style={styles.sheet}>
-          <Text style={styles.header}>CACHE OPENED</Text>
+        <HoloRarityFrame
+          rarity={pending.rarity}
+          style={styles.sheetHolo}
+          shimmer
+        >
+        <View style={[styles.sheet, { borderColor: pendingVisual.core }]}>
+          <Text style={[styles.header, { color: pendingVisual.core }]}>
+            CACHE OPENED
+          </Text>
           <Text style={styles.slotLine}>
             {`SLOT  ${SLOT_LABEL[pending.slot]}`}
           </Text>
@@ -261,6 +300,7 @@ export function GearComparisonModal(): React.ReactElement | null {
             </Text>
           </Pressable>
         </View>
+        </HoloRarityFrame>
       </View>
     </Modal>
   );
@@ -273,12 +313,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 16,
   },
+  sheetHolo: {
+    borderRadius: RADII.lg,
+  },
   sheet: {
     backgroundColor: COLORS.panel,
     borderWidth: 1,
     borderColor: COLORS.borderGlow,
     borderRadius: RADII.lg,
     padding: 14,
+  },
+  holoColumn: {
+    marginTop: 2,
+  },
+  holoInner: {
+    padding: 6,
   },
   header: {
     color: COLORS.cyan,
