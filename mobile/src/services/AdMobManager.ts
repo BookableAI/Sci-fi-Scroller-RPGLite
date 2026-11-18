@@ -160,6 +160,8 @@ function createAndLoadRewarded(): void {
       useGameStore.getState().activateOverclock(OVERCLOCK_DURATION_MS);
     } else if (kind === 'FABRICATION_SKIP') {
       useGameStore.getState().completeFabricationNow();
+    } else if (kind === 'OFFLINE_PATROL_2X') {
+      useGameStore.getState().claimOfflinePatrol(2);
     }
   });
 
@@ -295,6 +297,11 @@ export const AdMobManager = {
 
   showFabricationSkipRewarded(): Promise<boolean> {
     return this.showRewarded('FABRICATION_SKIP');
+  },
+
+  /** Double offline patrol STC/GC after a successful rewarded view. */
+  showOfflinePatrol2xRewarded(): Promise<boolean> {
+    return this.showRewarded('OFFLINE_PATROL_2X');
   },
 
   isInterstitialReady(): boolean {

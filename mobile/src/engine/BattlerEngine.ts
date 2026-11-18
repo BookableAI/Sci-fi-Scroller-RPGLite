@@ -4,6 +4,10 @@
  * Luminous combat VFX: hit-flash, crit micro-shake, rarity trails, credit arcs.
  */
 
+import {
+  goldCreditsForKill,
+  standardCreditsForKill,
+} from './combatEconomy';
 import { useGameStore } from '../store/useGameStore';
 import {
   computeAffinityCombatBonuses,
@@ -227,20 +231,6 @@ function enemyStats(world: number, level: number): {
   };
 }
 
-/** Standard Credits — common kill salvage (funds Cache upgrades). */
-function standardCreditsForKill(world: number, level: number, pr: number): number {
-  const tier = (world - 1) * 10 + level;
-  return Math.round(12 + tier * 4 + pr * 0.08);
-}
-
-/**
- * Gold Credits — scarcer kill salvage (spend to Open Cache).
- * Early W1 ≈ 1 GC/kill; open cost 5 → crates every ~5 kills early-game.
- */
-function goldCreditsForKill(world: number, level: number): number {
-  const tier = (world - 1) * 10 + level;
-  return Math.max(1, Math.round(0.85 + tier * 0.12));
-}
 
 function distanceToHostile(exo: ExoRigState, hostile: HostileConstruct): number {
   const ax = exo.x + exo.width * 0.5;

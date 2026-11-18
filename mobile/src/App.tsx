@@ -7,13 +7,24 @@
  */
 
 import React, { useEffect } from 'react';
-import { SafeAreaView, ScrollView, StyleSheet, View } from 'react-native';
+import {
+  AppState,
+  type AppStateStatus,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
 
+import { AutonomousPatrolModal } from './components/cache/AutonomousPatrolModal';
 import { BattlerViewport } from './components/battler/BattlerViewport';
 import { CacheGrid } from './components/cache/CacheGrid';
 import { GearComparisonModal } from './components/cache/GearComparisonModal';
 import { TelemetryPanel } from './components/ui/TelemetryPanel';
+import { useGameStore } from './store/useGameStore';
 import { COLORS } from './theme/colors';
+
+const ACTIVE_HEARTBEAT_MS = 30_000;
 
 function TelemetryPane(): React.ReactElement {
   return (
@@ -28,6 +39,7 @@ function TelemetryPane(): React.ReactElement {
         <TelemetryPanel />
       </ScrollView>
       <GearComparisonModal />
+      <AutonomousPatrolModal />
     </View>
   );
 }
@@ -51,6 +63,29 @@ export default function App(): React.ReactElement {
     } catch (error) {
       console.warn('[App] PurchaseManager soft-failed', error);
     }
+
+    // Cold launch: simulate capped offline patrol from lastActiveTimestamp.
+    // touchLastActive no-ops while a report is pending (preserves away stamp).
+    useGameStore.getState().evaluateOfflinePatrol();
+    useGameStore.getState().touchLastActive();
+
+    const onAppState = (next: AppStateStatus): void => {
+      if (next === 'active') {
+        useGameStore.getState().evaluateOfflinePatrol();
+      }
+      useGameStore.getState().touchLastActive();
+    };
+    const sub = AppState.addEventListener('change', onAppState);
+    const heartbeat = setInterval(() => {
+      if (AppState.currentState === 'active') {
+        useGameStore.getState().touchLastActive();
+      }
+    }, ACTIVE_HEARTBEAT_MS);
+
+    return () => {
+      sub.remove();
+      clearInterval(heartbeat);
+    };
   }, []);
 
   return (
