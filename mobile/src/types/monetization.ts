@@ -19,21 +19,22 @@ export const OVERCLOCK_DURATION_MS = 20 * 60 * 1000;
 
 export const OVERCLOCK_SPEED_MULTIPLIER = 2;
 
-/** Nanite pack grants (Sub-Routine Cores + Supply Cache fills) */
+/**
+ * Nanite pack grants — Sub-Routine Cores (IAP) + Gold Credits for Supply Cache opens.
+ * Small ≈ 2 opens; Large ≈ 6 opens at OPEN_CACHE_GOLD_COST (5).
+ */
 export const NANITE_PACK_REWARDS: Readonly<
   Record<
     typeof PRODUCT_IDS.NANITE_CACHE_PACK_SMALL | typeof PRODUCT_IDS.NANITE_CACHE_PACK_LARGE,
-    { cores: number; fillEmptyCacheSlots: boolean; bonusCaches: number }
+    { cores: number; goldCredits: number }
   >
 > = {
   [PRODUCT_IDS.NANITE_CACHE_PACK_SMALL]: {
     cores: 50,
-    fillEmptyCacheSlots: false,
-    bonusCaches: 2,
+    goldCredits: 10,
   },
   [PRODUCT_IDS.NANITE_CACHE_PACK_LARGE]: {
     cores: 150,
-    fillEmptyCacheSlots: true,
-    bonusCaches: 0,
+    goldCredits: 30,
   },
 };

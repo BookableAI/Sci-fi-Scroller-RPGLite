@@ -222,8 +222,7 @@ export const PurchaseManager = {
       const reward = NANITE_PACK_REWARDS[productId];
       useGameStore.getState().grantNanitePack({
         cores: reward.cores,
-        bonusCaches: reward.bonusCaches,
-        fillEmptyCacheSlots: reward.fillEmptyCacheSlots,
+        goldCredits: reward.goldCredits,
       });
     }
   },

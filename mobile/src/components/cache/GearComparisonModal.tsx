@@ -1,5 +1,5 @@
 /**
- * Gear comparison modal — shown when a Supply Cache finishes decryption.
+ * Gear comparison modal — shown after Open Cache yields a module.
  * New gear vs equipped slot; PR delta cyan (+) / amber (−).
  */
 
@@ -48,7 +48,7 @@ function GearColumn({
           <Text style={styles.stat}>{`PR  ${item.powerRating}`}</Text>
           <Text style={styles.stat}>{`PRI ${item.primaryStat}`}</Text>
           <Text style={styles.stat}>{`SEC ${item.secondaryStat}`}</Text>
-          <Text style={styles.salvage}>{`SALVAGE ${item.salvageValue} SC`}</Text>
+          <Text style={styles.salvage}>{`SALVAGE ${item.salvageValue} STC`}</Text>
         </>
       )}
     </View>
@@ -88,7 +88,7 @@ export function GearComparisonModal(): React.ReactElement | null {
     >
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
-          <Text style={styles.header}>DECRYPTION COMPLETE</Text>
+          <Text style={styles.header}>CACHE OPENED</Text>
           <Text style={styles.slotLine}>
             {`SLOT  ${SLOT_LABEL[pending.slot]}`}
           </Text>

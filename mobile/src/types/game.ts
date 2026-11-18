@@ -1,6 +1,6 @@
 /**
  * Sector Sentinel — core game type definitions.
- * Terminology: Supply Cache, Salvage Credits, Sub-Routine Cores.
+ * Terminology: Supply Cache, Standard Credits, Gold Credits, Sub-Routine Cores.
  */
 
 export const RARITIES = [
@@ -34,40 +34,27 @@ export interface GearItem {
   powerRating: number;
   primaryStat: number;
   secondaryStat: number;
+  /** Salvage payout in Standard Credits */
   salvageValue: number;
-}
-
-export interface SupplyCache {
-  id: string;
-  tier: number;
-  decryptionTimeSeconds: number;
-  isDecrypting: boolean;
-  /** 0–1 progress toward decryption completion */
-  progress: number;
 }
 
 export type EquippedGear = Partial<Record<GearSlot, GearItem>>;
 
 export interface PlayerState {
-  /** Salvage Credits */
-  credits: number;
-  /** Sub-Routine Cores */
+  /** Standard Credits — common salvage currency for Cache upgrades */
+  standardCredits: number;
+  /** Gold Credits — scarcer currency spent to open Supply Caches */
+  goldCredits: number;
+  /** Sub-Routine Cores — IAP / premium currency */
   cores: number;
   currentSectorWorld: number;
   currentSectorLevel: number;
   cacheLevel: number;
-  /** Max Supply Cache buffer slots (blueprint: 6) */
-  cacheSlots: number;
   equippedGear: EquippedGear;
 }
 
 /** Gear held in inventory (unequipped) */
 export type Inventory = GearItem[];
-
-/** Supply Cache buffer — hard cap of CACHE_BUFFER_CAPACITY slots */
-export type CacheBuffer = SupplyCache[];
-
-export const CACHE_BUFFER_CAPACITY = 6;
 
 /** Ordered rarity rank for threshold comparisons (lower = worse) */
 export const RARITY_RANK: Readonly<Record<Rarity, number>> = {
@@ -80,7 +67,13 @@ export const RARITY_RANK: Readonly<Record<Rarity, number>> = {
   CELESTIAL: 6,
 };
 
-/** Active Cache Upgrade fabrication job (Salvage Credits already spent). */
+/**
+ * Gold Credits spent to open one Supply Cache.
+ * Early kills grant ~1 GC; cost 5 → open roughly every 5 kills early-game.
+ */
+export const OPEN_CACHE_GOLD_COST = 5;
+
+/** Active Cache Upgrade fabrication job (Standard Credits already spent). */
 export interface CacheFabricationJob {
   targetLevel: number;
   durationSeconds: number;
@@ -110,23 +103,22 @@ export const TARGETING_PROTOCOL_LABELS: Readonly<
 export type PersistedGameSnapshot = {
   inventory: Inventory;
   equippedGear: EquippedGear;
-  cacheBuffer: CacheBuffer;
-  credits: number;
+  standardCredits: number;
+  goldCredits: number;
   cores: number;
   currentSectorWorld: number;
   currentSectorLevel: number;
   cacheLevel: number;
-  cacheSlots: number;
   /** Rarity below which auto-salvage applies; null disables filter */
   autoSalvageThreshold: Rarity | null;
   /** In-progress Cache Upgrade fabrication; null when idle */
   cacheFabrication: CacheFabricationJob | null;
   /**
-   * Newly decrypted gear awaiting comparison modal resolution.
+   * Newly opened gear awaiting comparison modal resolution.
    * Held here (and in inventory) until EQUIP & SALVAGE OLD / SALVAGE IMMEDIATELY.
    */
   pendingComparisonGear: GearItem | null;
-  /** Additional decrypted gear queued behind the active comparison modal */
+  /** Additional opened gear queued behind the active comparison modal */
   comparisonQueue: GearItem[];
   /** Epoch ms when System Overclock (2x) expires; null when inactive */
   overclockExpiresAtMs: number | null;
@@ -140,4 +132,4 @@ export interface TelemetryStats {
   kineticOutput: number;
   deflectionIndex: number;
   coreProcessingSpeed: number;
-};
+}
